@@ -5,10 +5,10 @@
 ## 当前工作位置
 
 - Git分支：`codex/v8-phase1`
-- 当前计划：`docs/superpowers/plans/2026-09-12-v8-phase1-foundation-migration.md`
-- 已完成：Phase 1全部任务；Phase 2 Task 1
-- 正在执行：Phase 2 Task 2（因果移动平均与确认摆动点）
-- 后续任务：按Phase 2计划依次完成Task 3–11
+- 当前计划：`docs/superpowers/plans/2026-09-25-weekly-trend-confirmation-strategy.md`
+- 已完成：Phase 1全部任务；Phase 2 Task 1–2
+- 正在执行：Phase 2 Task 3（稳定策略配置与决策契约）
+- 后续任务：按Phase 2计划依次完成Task 4–11
 
 ## 已保存检查点
 
