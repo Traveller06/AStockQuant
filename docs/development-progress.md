@@ -7,9 +7,10 @@
 - Git分支：`codex/v8-phase1`
 - 当前核心计划：`docs/superpowers/plans/2026-09-25-weekly-trend-confirmation-strategy.md`
 - Windows 集成计划：`docs/superpowers/plans/2026-09-25-v8-windows-integration.md`
-- 已完成：Phase 1全部任务；Phase 2 Task 1–8
-- 当前状态：v8.0 Windows 集成规格已审核，实施计划已保存，等待用户确认计划
-- 首个未完成步骤：集成计划 Task 1（原 Phase 2 Task 9，A股下一交易日撮合与组合约束）
+- 已完成：Phase 1全部任务；Phase 2 Task 1–9；Windows 集成 Task 1
+- 最新验证：撮合/账户聚焦15项通过，v8全量150项通过，语法和差异检查通过
+- 当前状态：正在按 v8.0 Windows 集成计划连续开发可安装可操作系统
+- 首个未完成步骤：集成计划 Task 2（回测引擎与原子审计存储）
 
 ## 已保存检查点
 
