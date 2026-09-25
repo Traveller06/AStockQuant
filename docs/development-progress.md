@@ -6,9 +6,9 @@
 
 - Git分支：`codex/v8-phase1`
 - 当前计划：`docs/superpowers/plans/2026-09-12-v8-phase1-foundation-migration.md`
-- 已完成：Phase 1 Task 1–5
-- 正在执行：Phase 1 Task 6（可审计运行存储）
-- 后续任务：Phase 1 Task 7，然后进入周线多头趋势日线确认策略Phase 2
+- 已完成：Phase 1 Task 1–6
+- 正在执行：Phase 1 Task 7（应用装配、依赖边界与Phase 1验收）
+- 后续任务：完成Phase 1验收后进入周线多头趋势日线确认策略Phase 2
 
 ## 已保存检查点
 
