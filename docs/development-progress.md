@@ -6,9 +6,9 @@
 
 - Git分支：`codex/v8-phase1`
 - 当前计划：`docs/superpowers/plans/2026-09-12-v8-phase1-foundation-migration.md`
-- 已完成：Phase 1 Task 1–3
-- 正在执行：Phase 1 Task 4（只读盘点v7旧数据）
-- 后续任务：Phase 1 Task 5–7，然后进入周线多头趋势日线确认策略Phase 2
+- 已完成：Phase 1 Task 1–4
+- 正在执行：Phase 1 Task 5（复制、校验、原子迁移与回滚）
+- 后续任务：Phase 1 Task 6–7，然后进入周线多头趋势日线确认策略Phase 2
 
 ## 已保存检查点
 
@@ -17,6 +17,7 @@
 - GitHub仓库：`Traveller06/AStockQuant`
 - GitHub恢复分支：`codex/v8-phase1`
 - 首个GitHub检查点：`e4bcab456e019456f93f51260196d8cbc60cbca3`
+- 最新远程检查点：以GitHub分支 `codex/v8-phase1` 的HEAD为准
 
 ## 恢复规则
 
