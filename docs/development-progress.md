@@ -6,9 +6,9 @@
 
 - Git分支：`codex/v8-phase1`
 - 当前计划：`docs/superpowers/plans/2026-09-25-weekly-trend-confirmation-strategy.md`
-- 已完成：Phase 1全部任务；Phase 2 Task 1–4
-- 正在执行：Phase 2 Task 5（三类周线形态与优先级）
-- 后续任务：按Phase 2计划依次完成Task 6–11
+- 已完成：Phase 1全部任务；Phase 2 Task 1–5
+- 正在执行：Phase 2 Task 6（日线确认与风险退出）
+- 后续任务：按Phase 2计划依次完成Task 7–11
 
 ## 已保存检查点
 
