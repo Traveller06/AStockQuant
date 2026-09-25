@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Mapping, TypeAlias
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from .enums import Market, OrderStatus, RunStatus, Side
 
@@ -61,6 +61,8 @@ class QuoteSnapshot:
 
 @dataclass(frozen=True)
 class Signal:
+    signal_id: str
+    source_run_id: str
     strategy_id: str
     code: str
     timestamp: datetime
@@ -68,6 +70,54 @@ class Signal:
     strength: float
     reason: str
     parameter_version: str
+
+    @classmethod
+    def new(
+        cls,
+        *,
+        source_run_id: str,
+        strategy_id: str,
+        code: str,
+        timestamp: datetime,
+        side: Side,
+        strength: float,
+        reason: str,
+        parameter_version: str,
+    ) -> Signal:
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError("Signal timestamp must be timezone-aware")
+        for value, name in (
+            (source_run_id, "source_run_id"),
+            (strategy_id, "strategy_id"),
+            (code, "code"),
+            (reason, "reason"),
+            (parameter_version, "parameter_version"),
+        ):
+            if not value.strip():
+                raise ValueError(f"{name} must not be empty")
+        if not isfinite(strength) or strength < 0:
+            raise ValueError("strength must be finite and non-negative")
+        identity = "|".join(
+            (
+                source_run_id,
+                strategy_id,
+                code,
+                timestamp.isoformat(),
+                side.value,
+                parameter_version,
+            )
+        )
+        return cls(
+            signal_id=str(uuid5(NAMESPACE_URL, identity)),
+            source_run_id=source_run_id,
+            strategy_id=strategy_id,
+            code=code,
+            timestamp=timestamp,
+            side=side,
+            strength=strength,
+            reason=reason,
+            parameter_version=parameter_version,
+        )
 
 
 @dataclass(frozen=True)
@@ -83,6 +133,7 @@ class Order:
     status: OrderStatus
     created_at: datetime
     filled_quantity: int
+    signal_id: str | None = None
 
     @classmethod
     def new(
@@ -94,6 +145,8 @@ class Order:
         side: Side,
         quantity: int,
         limit_price: float,
+        *,
+        signal_id: str | None = None,
     ) -> Order:
         if quantity <= 0:
             raise ValueError("quantity must be positive")
@@ -113,6 +166,7 @@ class Order:
             status=OrderStatus.NEW,
             created_at=datetime.now(timezone.utc),
             filled_quantity=0,
+            signal_id=signal_id,
         )
 
 
@@ -130,6 +184,7 @@ class Trade:
     stamp_tax: float
     slippage: float
     traded_at: datetime
+    signal_id: str
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from astock_quant.core.enums import DataHealth, Market, OrderStatus, RunStatus, Side
-from astock_quant.core.models import Bar, Order, RunManifest, Trade
+from astock_quant.core.models import Bar, Order, RunManifest, Signal, Trade
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -33,6 +33,41 @@ def test_order_has_explicit_initial_state():
 
     assert order.status is OrderStatus.NEW
     assert order.quantity == 100
+
+
+def test_signal_factory_creates_stable_correlation_fields():
+    timestamp = datetime(2026, 9, 25, 15, 0, tzinfo=SHANGHAI)
+    first = Signal.new(
+        source_run_id="run-1",
+        strategy_id="weekly_trend_confirmation",
+        code="600000",
+        timestamp=timestamp,
+        side=Side.BUY,
+        strength=1.0,
+        reason="突破回踩确认",
+        parameter_version="weekly-trend-v1",
+    )
+    second = Signal.new(
+        source_run_id="run-1",
+        strategy_id="weekly_trend_confirmation",
+        code="600000",
+        timestamp=timestamp,
+        side=Side.BUY,
+        strength=1.0,
+        reason="突破回踩确认",
+        parameter_version="weekly-trend-v1",
+    )
+
+    assert first.signal_id
+    assert first.signal_id == second.signal_id
+    assert first.source_run_id == "run-1"
+
+
+def test_order_can_retain_originating_signal_id():
+    order = Order.new(
+        "run-1", "paper", "600000", Market.SSE, Side.BUY, 100, 10.2, signal_id="sig-1"
+    )
+    assert order.signal_id == "sig-1"
 
 
 @pytest.mark.parametrize(
@@ -140,6 +175,7 @@ def test_order_and_trade_have_stable_field_contracts():
         "status",
         "created_at",
         "filled_quantity",
+        "signal_id",
     ]
     assert [field.name for field in fields(Trade)] == [
         "trade_id",
@@ -154,6 +190,7 @@ def test_order_and_trade_have_stable_field_contracts():
         "stamp_tax",
         "slippage",
         "traded_at",
+        "signal_id",
     ]
 
 
