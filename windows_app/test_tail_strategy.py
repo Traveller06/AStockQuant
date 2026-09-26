@@ -691,10 +691,14 @@ class TailUiContractTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             window = module.MainWindow()
-            self.assertEqual(module.APP_VERSION, "8.0.0")
+            self.assertEqual(module.APP_VERSION, "8.1.0")
             self.assertIn("尾盘两日短线", window.menu.items)
             self.assertTrue(hasattr(window, "tail_strategy"))
             self.assertGreaterEqual(len(window.pages.widgets), 9)
+            self.assertEqual(window.menu.items[8], "周线趋势确认")
+            self.assertEqual(window.weekly_trend.__class__.__name__, "WeeklyTrendPage")
+            self.assertIn("scan_button", vars(window.weekly_trend))
+            self.assertIn("screen_table", vars(window.weekly_trend))
         finally:
             for name, value in previous.items():
                 if value is None:

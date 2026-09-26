@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.0.0"
+APP_VERSION = "8.1.0"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -3139,7 +3139,7 @@ class TailStrategyPage(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.0.0"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.1.0"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)

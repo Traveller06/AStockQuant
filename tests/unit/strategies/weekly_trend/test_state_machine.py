@@ -103,3 +103,25 @@ def test_unfilled_entry_can_only_cancel_confirmed_state() -> None:
     assert cancelled.status is PatternStatus.CANCELLED_UNFILLED
     assert cancelled.emitted_signal_id == "sig-1"
     assert mark_entry_unfilled(_state(), SESSIONS[3]) == _state()
+
+
+def test_new_setup_arms_inactive_state_without_prior_manual_state():
+    inactive = PatternState('600000', PatternStatus.INACTIVE, None, None, None, None,
+                            '1.0.0', 'weekly-trend-v1', CREATED)
+    result = advance_state(inactive, SESSIONS[0], _trend(), _confirmation(), _setup(),
+                           calendar_sessions=SESSIONS)
+    assert result.status is PatternStatus.WAITING_CONFIRMATION
+    assert result.setup == _setup()
+    assert result.expires_on == SESSIONS[19]
+
+
+def test_new_weekly_setup_rearms_after_expiration_but_same_setup_does_not():
+    expired = replace(_state(), status=PatternStatus.EXPIRED)
+    assert advance_state(expired, SESSIONS[20], _trend(), _confirmation(), _setup(),
+                         calendar_sessions=SESSIONS) == expired
+    newer = _setup(SetupKind.BREAKOUT, datetime(2026, 9, 20, 15, tzinfo=SHANGHAI))
+    later = SESSIONS + tuple(SESSIONS[-1] + timedelta(days=n) for n in range(1, 21))
+    result = advance_state(expired, SESSIONS[22], _trend(), _confirmation(), newer,
+                           calendar_sessions=later)
+    assert result.status is PatternStatus.WAITING_CONFIRMATION
+    assert result.setup is newer

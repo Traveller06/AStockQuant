@@ -53,3 +53,13 @@ def test_bad_symbol_is_retained_in_run_and_export(tmp_path):
     assert facade.open_last_result().error_count == 1
     with zipfile.ZipFile(facade.export_audit_bundle(tmp_path / 'audit.zip')) as bundle:
         assert 'adapter_issues.json' in bundle.namelist()
+
+
+def test_real_strategy_accepts_v7_forward_adjusted_history(tmp_path):
+    frame = _frame()
+    dates = pd.bdate_range('2025-01-02', periods=160)
+    frame = pd.concat([frame, pd.DataFrame({'open':[10.]*70, 'high':[11.]*70,
+        'low':[9.]*70, 'close':[10.]*70, 'volume':[10000.]*70}, index=dates[90:])])
+    summary = WeeklyTrendFacade(tmp_path, '8.0.0').run(
+        {'600000': frame}, DesktopBacktestOptions.defaults())
+    assert not any('adjustment basis' in str(error) for error in summary.tables['errors'])

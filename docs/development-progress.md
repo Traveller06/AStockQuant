@@ -1,6 +1,6 @@
-# AStockQuant v8.0 开发恢复点
+# AStockQuant v8.1.0 开发恢复点
 
-更新时间：2026-09-25
+更新时间：2026-09-26
 
 ## 当前工作位置
 
@@ -8,9 +8,9 @@
 - 当前核心计划：`docs/superpowers/plans/2026-09-25-weekly-trend-confirmation-strategy.md`
 - Windows 集成计划：`docs/superpowers/plans/2026-09-25-v8-windows-integration.md`
 - 已完成：Phase 1全部任务；Phase 2 Task 1–11；Windows 集成 Task 1–8
-- 最新验证：v8全量172项通过；发行包独立解压64项离线测试通过
-- 当前状态：正在按 v8.0 Windows 集成计划连续开发可安装可操作系统
-- 当前交付：Windows v8.0.0 双击 ZIP 已构建并完成 Linux 离线验证；Windows GUI 实机验证仍待用户安装后确认
+- 最新验证：周线选股源码 183 项及离线 65 项通过；v8.1 安装包独立解压 65 项通过，Linux Qt offscreen 从 ZIP 打开界面并完成股票池筛选。
+- 当前状态：v8.1.0 升级包已构建并复核；Windows GUI 实机验证仍待用户安装后确认。
+- 当前交付：`dist/AStockQuant_v8_1_周线策略选股_双击版.zip`，SHA-256 `ac14fd9bb6ad7794826ec099ca87de4e3d15f6c79208677e02063b76a8a6d621`。
 
 ## 已保存检查点
 
@@ -20,6 +20,13 @@
 - GitHub恢复分支：`codex/v8-phase1`
 - 首个GitHub检查点：`e4bcab456e019456f93f51260196d8cbc60cbca3`
 - 最新远程检查点：以GitHub分支 `codex/v8-phase1` 的HEAD为准
+
+## 周线选股增量（2026-09-26）
+
+- 用户要求按周线趋势确认策略直接筛选股票。
+- 已修复未激活形态无法进入等待确认的状态转换（`a4cc930`）。
+- 已实现本地股票缓存扫描与独立结果保存，`qfq` 前复权口径映射和未完成周线隔离；v8.1.0 安装包验证记录见 `docs/v8.1-windows-screen-verification.md`。
+- 恢复点：先运行 `git status --short --branch` 并查看最新提交；本地功能、独立安装包和测试均完成，仍需同步 GitHub 及 Windows GUI 实机确认。不得重建项目或删除旧缓存。
 
 ## 恢复规则
 

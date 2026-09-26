@@ -42,7 +42,9 @@ def _replacement_expiry(
 ) -> date:
     later = tuple(session for session in calendar_sessions if session > setup.occurred_at.date())
     if len(later) < valid_sessions:
-        raise ValueError("calendar_sessions do not cover the replacement setup validity window")
+        # A live scan cannot know future exchange holidays. Count observed
+        # sessions until the expiry date can be resolved from actual data.
+        return date.max
     return later[valid_sessions - 1]
 
 
@@ -59,6 +61,27 @@ def advance_state(
 ) -> PatternState:
     """Advance one state in the documented transition priority order."""
 
+    if (
+        new_setup is not None
+        and trend.qualified
+        and trend.sufficient_data
+        and new_setup.occurred_at.date() <= session
+        and (state.status is PatternStatus.INACTIVE or
+             (state.status in TERMINAL_STATUSES and state.created_at is not None
+              and new_setup.occurred_at > state.created_at))
+    ):
+        settings = config or WeeklyTrendConfig()
+        return PatternState(
+            code=state.code,
+            status=PatternStatus.WAITING_CONFIRMATION,
+            setup=new_setup,
+            created_at=new_setup.occurred_at,
+            expires_on=_replacement_expiry(new_setup, calendar_sessions, settings.setup_valid_sessions),
+            emitted_signal_id=None,
+            strategy_version=state.strategy_version,
+            parameter_version=state.parameter_version,
+            data_cutoff=_cutoff(state, session),
+        )
     if state.status in TERMINAL_STATUSES:
         return state
     if state.status is not PatternStatus.WAITING_CONFIRMATION or state.setup is None:
@@ -67,7 +90,11 @@ def advance_state(
     cutoff = _cutoff(state, session)
     if not trend.qualified or not trend.sufficient_data:
         return replace(state, status=PatternStatus.INVALIDATED, data_cutoff=cutoff)
-    if state.expires_on is not None and session > state.expires_on:
+    settings = config or WeeklyTrendConfig()
+    observed_later = sum(day <= session and day > state.created_at.date() for day in calendar_sessions)
+    if (state.expires_on is not None and session > state.expires_on) or (
+        state.expires_on == date.max and observed_later > settings.setup_valid_sessions
+    ):
         return replace(state, status=PatternStatus.EXPIRED, data_cutoff=cutoff)
 
     if new_setup is not None and _priority(new_setup.kind) < _priority(state.setup.kind):

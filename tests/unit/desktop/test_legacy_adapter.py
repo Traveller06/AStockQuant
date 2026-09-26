@@ -16,6 +16,7 @@ def test_legacy_daily_cache_converts_without_changing_source():
     assert market.daily_bars['600000'][0].timestamp.utcoffset().total_seconds() == 28800
     assert market.daily_bars['600000'][0].amount == 1050.0
     assert market.calendar.sessions[0].isoformat() == '2026-09-10'
+    assert market.adjustment_basis == 'forward'
     pd.testing.assert_frame_equal(frame, original)
 
 
@@ -44,6 +45,11 @@ def test_duplicate_and_invalid_dates_are_reported_per_symbol():
 def test_missing_adjustment_basis_is_rejected():
     with pytest.raises(ValueError, match='复权'):
         adapt_legacy_frames({}, adjustment_basis='', source='v7_cache')
+
+
+def test_v7_cache_rejects_incompatible_adjustment_basis():
+    with pytest.raises(ValueError, match='前复权'):
+        adapt_legacy_frames({}, adjustment_basis='hfq', source='v7_cache')
 
 
 def test_missing_execution_flags_and_amount_are_identified():

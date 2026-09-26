@@ -39,6 +39,12 @@ def adapt_legacy_frames(
         raise ValueError("必须明确选择复权方式")
     if not source.strip():
         raise ValueError("必须指定数据来源")
+    aliases = {'qfq': 'forward', 'hfq': 'backward', 'none': 'unadjusted'}
+    normalized_basis = aliases.get(adjustment_basis, adjustment_basis)
+    if normalized_basis not in {'forward', 'backward', 'unadjusted'}:
+        raise ValueError('无法识别复权方式')
+    if source == 'v7_cache' and normalized_basis != 'forward':
+        raise ValueError('旧版日线缓存只支持前复权，不能按其他复权方式计算')
     daily: dict[str, tuple[Bar, ...]] = {}
     execution: dict[str, tuple[ExecutionBar, ...]] = {}
     issues: list[LegacyDataIssue] = []
@@ -91,5 +97,5 @@ def adapt_legacy_frames(
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             issues.append(LegacyDataIssue(symbol, f"{symbol} 数据转换失败：{exc}"))
     return AdaptedMarket(daily, execution, TradingCalendar(tuple(sorted(sessions))),
-                         tuple(issues), adjustment_basis, max(sessions) if sessions else None,
+                         tuple(issues), normalized_basis, max(sessions) if sessions else None,
                          amount_is_estimated, availability_is_unknown)
