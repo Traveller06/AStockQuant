@@ -29,13 +29,18 @@ class V8OfflineTests(unittest.TestCase):
             result = scanner.scan_cache(adjustment_basis='qfq', as_of=days[-1])
             self.assertEqual(result.watch_count, 1)
             self.assertEqual(scanner.open_last_screen().pool_size, 1)
+            three_tier = WeeklyTrendScanner(root, three_tier=True)
+            graded = three_tier.scan_cache(adjustment_basis='qfq', as_of=days[-1])
+            self.assertEqual(graded.rows[0].status, 'preconfirm')
+            self.assertEqual(three_tier.open_last_screen().rows, graded.rows)
+            self.assertEqual(scanner.open_last_screen().rows, result.rows)
 
     def test_run_and_reopen_audit(self):
         dates = pd.bdate_range('2025-01-02', periods=90)
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.1.0')
+            facade = WeeklyTrendFacade(Path(temporary), '8.2.0')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
