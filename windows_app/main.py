@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.2.0"
+APP_VERSION = "8.2.1"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -378,7 +378,8 @@ def parse_eastmoney_klines(klines):
     return pd.DataFrame([x.split(",")[:6] for x in klines],columns=["date","open","close","high","low","volume"])
 
 
-def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_refresh=False, progress_callback=None):
+def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_refresh=False,
+                  progress_callback=None, persist=True):
     """多源读取前复权日线：缓存、腾讯、东方财富、AKShare、BaoStock。"""
     def report(**payload):
         if progress_callback:
@@ -482,7 +483,8 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
     frame = frame.dropna().drop_duplicates("date").set_index("date").sort_index()
     if len(frame) < 120: raise RuntimeError(f"有效历史行情不足：{len(frame)}行")
     frame.attrs["data_source"]=source_used; report(stage="数据源成功",source=source_used,detail=f"取得{len(frame)}行")
-    frame.to_csv(cache_file)
+    if persist:
+        frame.to_csv(cache_file)
     return frame
 
 
@@ -3138,8 +3140,17 @@ class TailStrategyPage(QWidget):
 
 
 class MainWindow(QMainWindow):
+    def closeEvent(self, event):
+        worker = getattr(getattr(self, 'weekly_trend', None), 'refresh_worker', None)
+        if worker is not None and worker.isRunning():
+            worker.pause_requested = True
+            event.ignore()
+            QTimer.singleShot(800, self.close)
+            return
+        super().closeEvent(event)
+
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.2.0"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.2.1"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
@@ -3158,7 +3169,7 @@ class MainWindow(QMainWindow):
                 from .weekly_trend_page import create_weekly_trend_page
             except ImportError:
                 from weekly_trend_page import create_weekly_trend_page
-            self.weekly_trend=create_weekly_trend_page(APP_DIR,APP_VERSION)
+            self.weekly_trend=create_weekly_trend_page(APP_DIR,APP_VERSION,history_fetcher=fetch_history)
         except Exception as exc:
             self.weekly_trend=QLabel("v8 内核加载失败："+str(exc)+"\n请检查安装组件，然后重新运行安装脚本。旧策略仍可使用。")
             self.weekly_trend.setWordWrap(True)
