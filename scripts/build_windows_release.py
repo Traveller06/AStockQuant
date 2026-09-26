@@ -14,8 +14,8 @@ WINDOWS_PROGRAM_FILES = frozenset({
     'requirements.txt', 'README.txt', 'install.bat', 'run.bat',
     'test_execution.py', 'test_tail_strategy.py', 'test_v8_offline.py',
     '1_第一次双击_安装并打开.bat', '2_以后双击_启动软件.bat',
-    '3_双击_离线自检.bat', '只看这里_v8.1_两步打开.txt',
-    'V8.1_周线选股说明.txt',
+    '3_双击_离线自检.bat', '只看这里_v8.1_两步打开.txt', '只看这里_v8.2_两步打开.txt',
+    'V8.1_周线选股说明.txt', 'V8.2_三级筛选说明.txt',
 })
 FORBIDDEN = frozenset({'cache', 'tail_strategy_cache', 'tail_strategy_state.json',
                        'v8_state', 'v8_runs', 'research_sample.json',
@@ -47,8 +47,8 @@ def build_release(repo_root: Path, destination: Path) -> ReleaseReport:
         files[name] = path.read_bytes()
     if any(FORBIDDEN.intersection(Path(name).parts) for name in files):
         raise ValueError('发行包包含运行数据或敏感文件')
-    if b'APP_VERSION = "8.1.0"' not in files['main.py']:
-        raise ValueError('主程序版本号不是8.1.0')
+    if b'APP_VERSION = "8.2.0"' not in files['main.py']:
+        raise ValueError('主程序版本号不是8.2.0')
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + '.building')
     if temporary.exists():
