@@ -82,6 +82,27 @@ def test_old_provider_bars_are_not_presented_as_a_current_signal(tmp_path):
     assert result.failed == 3 and result.selected == 0
 
 
+def test_short_stock_history_does_not_abort_other_symbols_and_can_retry(tmp_path):
+    attempts = []
+
+    def fetch(code):
+        attempts.append(code)
+        if code == '000001' and attempts.count(code) == 1:
+            raise RuntimeError('有效历史行情不足：38行')
+        return bars()
+
+    scanner = FullMarketScanner(tmp_path, universe_loader=universe,
+                                history_fetcher=fetch, minimum_pool=3)
+    first = scanner.scan(target=TARGET)
+    assert first.completed == 4 and first.failed == 1
+    assert next(row for row in first.rows if row.symbol == '000001').status == 'error'
+    assert (tmp_path / 'v8_market_updates' / '430001.csv').exists()
+    retried = scanner.scan(target=TARGET)
+    assert retried.completed == 4 and retried.failed == 0
+    assert attempts.count('000001') == 2
+    assert attempts.count('600000') == 1
+
+
 def test_full_universe_keeps_st_and_does_not_overwrite_legacy_pool(tmp_path, monkeypatch):
     from windows_app import main
     original = tmp_path / 'a_share_universe.json'
