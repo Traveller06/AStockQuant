@@ -1,0 +1,59 @@
+AStockQuant v7.3 Windows 升级安装说明
+====================================
+
+一、升级前
+
+1. 关闭旧版窗口，并在旧命令行窗口按 Ctrl+C 停止 Python。
+2. 备份整个 C:\AStockQuant。至少保留以下用户数据：
+   cache\
+   research_sample.json
+   research_data_checkpoint.json
+   a_share_universe.json
+   watchlist.json
+   paper_account.json
+
+二、覆盖安装
+
+1. 解压 AStockQuant_v7_3_Windows.zip。
+2. 将压缩包内文件复制到 C:\AStockQuant。
+3. Windows 询问时选择“替换目标中的文件”。
+4. 不要删除原来的 cache 文件夹和上述 JSON 数据文件。
+
+三、安装依赖并启动
+
+首次安装或没有 .venv 文件夹：先双击 install.bat，完成后双击 run.bat。
+
+打开命令提示符，逐行执行：
+
+cd /d C:\AStockQuant
+py -3.11 -m venv .venv
+call .venv\Scripts\activate
+python -m pip install -r requirements.txt
+python main.py
+
+依赖安装完成后，也可以双击 run.bat 启动。
+
+如果命令行只显示 Requirement already satisfied，表示依赖已经安装；等待命令提示符重新出现后，再输入 python main.py。不要把两条命令粘在同一行。
+
+四、首次验证顺序
+
+1. 打开“研究样本与数据准备”。
+2. 选择“300只分层样本”，完成到有效300/300。旧版已有合格样本和缓存时会复用。
+3. 打开“牛熊双引擎验证”。
+4. 入场规则选择“1 推荐”，样本选择“严格300”。
+5. 点击“运行7.3验证”。进度条、当前阶段和运行计时会持续显示。
+6. 若门禁提示少于300只或代码不一致，返回数据准备页补齐，不要手工删除股票代码。
+
+五、规则1口径
+
+周线多头候选有效期内，日线收盘站上 MA5 和 MA20 且出现阳包阴，即生成“买入观察”；同日成交量高于前5日均量时标为“强确认”。回测一律在下一交易日开盘撮合，避免使用当天尚未完成的信息。
+
+六、离线自检
+
+cd /d C:\AStockQuant
+call .venv\Scripts\activate
+python test_execution.py
+
+看到 OK 表示离线核心回归测试通过。图形界面和实时数据源仍需在本机联网环境核验。
+
+重要说明：本软件仅用于研究回测，不自动下单，不保证收益。年化2%—5%、年度亏损不低于-1%是研究验收目标，不是收益承诺。

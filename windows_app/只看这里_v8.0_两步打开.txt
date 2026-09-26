@@ -1,0 +1,11 @@
+AStockQuant v8.0.0 中文 Windows 双击版
+
+1. 关闭旧版软件。解压 ZIP，把所有文件复制到 C:\AStockQuant，选择替换同名程序文件。
+2. 双击「1_第一次双击_安装并打开.bat」，等待依赖安装后自动打开。
+以后只双击「2_以后双击_启动软件.bat」。也可以运行「3_双击_离线自检.bat」检查程序。
+
+升级时请保留旧数据：cache、tail_strategy_cache、tail_strategy_state.json、research_sample.json、validation_snapshot_v1.json.gz；v8 新数据在 v8_state 和 v8_runs。不要清空旧安装目录。
+
+旧策略入口和参数保留。新增「周线趋势确认」须手动进入；仅用于历史研究与本地模拟，不连接真实券商。
+新页使用「研究样本与数据准备」已有的本地日线缓存，输入代码后点「运行回测」。运行结果在 v8_runs 下，能打开上次结果或导出审计包。
+旧缓存不包含成交额以及准确停牌/涨跌停标志，该页会提示估算风险。执行环境未进行 Windows 图形界面实机验证。

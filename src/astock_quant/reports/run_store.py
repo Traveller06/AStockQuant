@@ -137,6 +137,19 @@ class RunStore:
             _atomic_text(stored.path / "_COMPLETE", f"{status.value}\n")
         return StoredRun(finished, stored.path)
 
+    def complete(self, run_id: str, *, required_files: set[str]) -> StoredRun:
+        run_path = self._existing_run_path(run_id)
+        for name in sorted(required_files):
+            output = run_path / self._validate_output_name(name)
+            if output.is_symlink() or not output.is_file():
+                raise _incomplete(run_id, f"required audit artifact missing: {name}")
+            if name.endswith(".json"):
+                try:
+                    json.loads(output.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise _corruption(name, f"required audit artifact is corrupt: {exc}") from exc
+        return self.finish(run_id, RunStatus.COMPLETED)
+
     def open_completed(self, run_id: str) -> StoredRun:
         run_path = self._existing_run_path(run_id)
         if not (run_path / "_COMPLETE").is_file():

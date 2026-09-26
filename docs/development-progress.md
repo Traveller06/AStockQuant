@@ -7,10 +7,10 @@
 - Git分支：`codex/v8-phase1`
 - 当前核心计划：`docs/superpowers/plans/2026-09-25-weekly-trend-confirmation-strategy.md`
 - Windows 集成计划：`docs/superpowers/plans/2026-09-25-v8-windows-integration.md`
-- 已完成：Phase 1全部任务；Phase 2 Task 1–9；Windows 集成 Task 1
-- 最新验证：撮合/账户聚焦15项通过，v8全量150项通过，语法和差异检查通过
+- 已完成：Phase 1全部任务；Phase 2 Task 1–11；Windows 集成 Task 1–8
+- 最新验证：v8全量172项通过；发行包独立解压64项离线测试通过
 - 当前状态：正在按 v8.0 Windows 集成计划连续开发可安装可操作系统
-- 首个未完成步骤：集成计划 Task 2（回测引擎与原子审计存储）
+- 当前交付：Windows v8.0.0 双击 ZIP 已构建并完成 Linux 离线验证；Windows GUI 实机验证仍待用户安装后确认
 
 ## 已保存检查点
 
