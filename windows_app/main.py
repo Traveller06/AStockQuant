@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.3.1"
+APP_VERSION = "8.3.2"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -400,6 +400,22 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             pass
     s = market_symbol or symbol(code)
     session = requests.Session(); session.trust_env = False; all_rows = []; source_used=""; source_errors=[]
+
+    def usable(candidate, source):
+        """Reject a truncated provider response so the next source can try."""
+        try:
+            candidate = candidate.copy()
+            candidate['date'] = pd.to_datetime(candidate['date'])
+            for column in ('open', 'close', 'high', 'low', 'volume'):
+                candidate[column] = pd.to_numeric(candidate[column], errors='coerce')
+            candidate = candidate.dropna().drop_duplicates('date').set_index('date').sort_index()
+            if len(candidate) < min_rows:
+                raise ValueError(f'有效历史行情不足：{len(candidate)}行')
+            return candidate
+        except (KeyError, ValueError, TypeError) as exc:
+            source_errors.append(source + ':' + str(exc)[:100])
+            report(stage='数据源结果不足，切换备用源', source=source, detail=str(exc)[:100])
+            return None
     current_year = datetime.now().year
     try:
         for year in range(start_year, current_year + 1, 2):
@@ -423,10 +439,12 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
     except Exception as exc:
         source_errors.append("腾讯:"+str(exc)[:100]); all_rows=[]
 
+    frame = None
     if all_rows:
-        frame=pd.DataFrame([r[:6] for r in all_rows], columns=["date","open","close","high","low","volume"])
-        source_used="腾讯"
-    else:
+        frame = usable(pd.DataFrame([r[:6] for r in all_rows],
+            columns=['date','open','close','high','low','volume']), '腾讯')
+        if frame is not None: source_used = '腾讯'
+    if frame is None:
         try:
             secid=eastmoney_secid(code,market_symbol)
             report(stage="切换第二数据源",source="东方财富直连",request=1,detail=f"查询 {secid} 的前复权日线")
@@ -436,7 +454,8 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
                 timeout=22,headers={"User-Agent":"Mozilla/5.0","Referer":"https://quote.eastmoney.com/"})
             response.raise_for_status(); klines=(response.json().get("data") or {}).get("klines") or []
             if not klines: raise RuntimeError("东方财富直连接口未返回日线")
-            frame=parse_eastmoney_klines(klines); source_used="东方财富直连"
+            frame=usable(parse_eastmoney_klines(klines), '东方财富直连')
+            if frame is not None: source_used='东方财富直连'
         except Exception as exc:
             source_errors.append("东方财富直连:"+str(exc)[:100]); frame=None
 
@@ -453,7 +472,8 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             mapping={"日期":"date","开盘":"open","收盘":"close","最高":"high","最低":"low","成交量":"volume"}
             if backup is None or backup.empty or not set(mapping).issubset(backup.columns):
                 raise RuntimeError("备用接口未返回完整日线")
-            frame=backup.rename(columns=mapping)[list(mapping.values())]; source_used="AKShare兼容层"
+            frame=usable(backup.rename(columns=mapping)[list(mapping.values())], 'AKShare兼容层')
+            if frame is not None: source_used='AKShare兼容层'
         except Exception as exc:
             source_errors.append("AKShare:"+str(exc)[:100]); frame=None
 
@@ -469,7 +489,9 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             rows=[]
             while result.error_code=="0" and result.next(): rows.append(result.get_row_data())
             if not rows: raise RuntimeError("BaoStock未返回日线:"+str(result.error_msg))
-            frame=pd.DataFrame(rows,columns=["date","open","high","low","close","volume"])[["date","open","close","high","low","volume"]]; source_used="BaoStock"
+            frame=usable(pd.DataFrame(rows,columns=["date","open","high","low","close","volume"])
+                [["date","open","close","high","low","volume"]], 'BaoStock')
+            if frame is not None: source_used='BaoStock'
         except Exception as exc:
             source_errors.append("BaoStock:"+str(exc)[:100]); frame=None
         finally:
@@ -479,10 +501,6 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
 
     if frame is None:
         raise RuntimeError("｜".join(source_errors))
-    frame["date"] = pd.to_datetime(frame.date)
-    for c in ["open","close","high","low","volume"]: frame[c] = pd.to_numeric(frame[c], errors="coerce")
-    frame = frame.dropna().drop_duplicates("date").set_index("date").sort_index()
-    if len(frame) < min_rows: raise RuntimeError(f"有效历史行情不足：{len(frame)}行")
     frame.attrs["data_source"]=source_used; report(stage="数据源成功",source=source_used,detail=f"取得{len(frame)}行")
     if persist:
         frame.to_csv(cache_file)
@@ -1318,6 +1336,7 @@ class FullMarketWorker(QThread):
         self.pause_requested = False
 
     def run(self):
+        stage = '核实沪深300收盘日'
         try:
             from astock_quant.desktop.weekly_trend_scanner import _safe_date
             cutoff = _safe_date()
@@ -1331,12 +1350,13 @@ class FullMarketWorker(QThread):
             target = max(candidates)
             if (cutoff - target).days > 15:
                 raise ValueError(f'沪深300指数最新行情仅到 {target}，距离预期收盘日过久，已停止全市场检测')
+            stage = '读取全A股股票池并逐只检测'
             result = self.scanner.scan(target=target,
                 progress=lambda count, msg: self.progress_changed.emit(count, msg),
                 should_pause=lambda: self.pause_requested)
             self.completed.emit(result)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(f'v{APP_VERSION} {stage}失败：{exc}')
 
 
 class KlinePage(QWidget):
@@ -3293,7 +3313,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.1"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.2"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
