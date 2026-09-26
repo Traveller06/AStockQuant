@@ -158,7 +158,7 @@ class FullMarketScanner:
                     days = {stamp.date() for stamp in frame.index if stamp.date() <= target}
                     row = _three_tier_row(code, frame, target,
                         _closed_week_calendar(days, target), 'qfq', name)
-                except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
+                except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, RuntimeError) as exc:
                     row = ScreenRow(code, name, 'error', '', None, '', f'行情或筛选失败：{exc}', ())
             _atomic_json(path, asdict(row))
             if progress:
