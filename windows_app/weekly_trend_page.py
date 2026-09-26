@@ -33,6 +33,42 @@ class WeeklyScreenWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class WeeklyRefreshWorker(QThread):
+    progress_changed = Signal(int, str)
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, app_dir, history_fetcher, as_of):
+        super().__init__()
+        self.app_dir, self.history_fetcher, self.as_of = app_dir, history_fetcher, as_of
+        self.pause_requested = False
+
+    def run(self):
+        try:
+            from astock_quant.desktop.weekly_trend_updater import CachedHistoryUpdater
+            from astock_quant.desktop.weekly_trend_scanner import _safe_date
+            cutoff = min(self.as_of, _safe_date()) if self.as_of else _safe_date()
+            if self.as_of is None:
+                self.progress_changed.emit(0, '正在核实指数最近收盘日…')
+                index = self.history_fetcher('INDEX_000300', start_year=max(2018, cutoff.year-1),
+                    market_symbol='sh000300', force_refresh=True, persist=False)
+                days = pd.to_datetime(index.index, errors='coerce')
+                candidates = [value.date() for value in days if not pd.isna(value) and value.date() <= cutoff]
+                if not candidates:
+                    raise ValueError('指数日线没有已收盘交易日；可以填写明确的历史截止日重试')
+                cutoff = max(candidates)
+            self.progress_changed.emit(0, f'目标收盘日 {cutoff}，开始补齐本地股票池…')
+            updater = CachedHistoryUpdater(self.app_dir)
+            result = updater.refresh(target=cutoff,
+                fetcher=lambda code: self.history_fetcher(code,
+                    start_year=max(2018, cutoff.year-1), force_refresh=True, persist=False),
+                progress=lambda pct, msg: self.progress_changed.emit(pct, msg),
+                should_pause=lambda: self.pause_requested)
+            self.completed.emit((cutoff, result))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class WeeklyRunWorker(QThread):
     progress_changed = Signal(int, str)
     completed = Signal(object)
@@ -63,7 +99,7 @@ class WeeklyRunWorker(QThread):
 
 
 class WeeklyTrendPage(QWidget):
-    def __init__(self, facade, cache_dir):
+    def __init__(self, facade, cache_dir, history_fetcher=None):
         super().__init__()
         self.facade, self.cache_dir = facade, Path(cache_dir)
         from astock_quant.desktop.weekly_trend_scanner import WeeklyTrendScanner
@@ -71,6 +107,8 @@ class WeeklyTrendPage(QWidget):
         self.three_tier_scanner = WeeklyTrendScanner(self.cache_dir.parent, three_tier=True)
         self.screen_worker = None
         self.screen_result = None
+        self.history_fetcher = history_fetcher
+        self.refresh_worker = None
         self.worker = None
         root = QVBoxLayout(self)
         root.addWidget(QLabel('周线趋势确认 · 股票池筛选与独立回测'))
@@ -92,6 +130,17 @@ class WeeklyTrendPage(QWidget):
                                  (self.export_screen_button, self.export_screen)):
             button.clicked.connect(callback); screen_controls.addWidget(button)
         root.addLayout(screen_controls)
+        refresh_controls = QHBoxLayout()
+        self.refresh_button = QPushButton('更新过期行情（可续跑）')
+        self.pause_refresh_button = QPushButton('暂停更新')
+        self.pause_refresh_button.setEnabled(False)
+        self.refresh_button.setEnabled(self.history_fetcher is not None)
+        self.refresh_button.clicked.connect(self.start_refresh)
+        self.pause_refresh_button.clicked.connect(self.pause_refresh)
+        refresh_controls.addWidget(self.refresh_button)
+        refresh_controls.addWidget(self.pause_refresh_button)
+        refresh_controls.addWidget(QLabel('只更新本机 cache 已有股票；逐只保存增量，不改原始缓存。'))
+        root.addLayout(refresh_controls)
         self.screen_status = QLabel('等待筛选。结果只覆盖已有日线缓存，并标明实际筛选日期和样本数量。')
         self.screen_status.setWordWrap(True); root.addWidget(self.screen_status)
         self.screen_table = QTableWidget(0, 7)
@@ -239,6 +288,60 @@ class WeeklyTrendPage(QWidget):
     def _active_scanner(self):
         return self.three_tier_scanner if self.screen_mode.currentIndex() == 0 else self.scanner
 
+    def start_refresh(self):
+        if self.history_fetcher is None:
+            QMessageBox.warning(self, '未配置数据源', '本机程序未提供历史行情更新入口。')
+            return
+        try:
+            cutoff = date.fromisoformat(self.screen_date.text().strip()) if self.screen_date.text().strip() else None
+        except ValueError:
+            QMessageBox.warning(self, '日期有误', '请使用 YYYY-MM-DD 格式，或留空读取指数最新收盘日。')
+            return
+        self.refresh_button.setEnabled(False)
+        self.pause_refresh_button.setEnabled(True)
+        self.scan_button.setEnabled(False)
+        self.last_screen_button.setEnabled(False)
+        self.export_screen_button.setEnabled(False)
+        self.screen_result = None
+        self.screen_table.setRowCount(0)
+        self.screen_status.setText('正在补齐行情；关闭窗口前请先暂停，已成功的股票会保留。')
+        self.refresh_worker = WeeklyRefreshWorker(self.cache_dir.parent, self.history_fetcher, cutoff)
+        self.refresh_worker.progress_changed.connect(
+            lambda pct, msg: (self.progress.setValue(pct), self.screen_status.setText(msg)))
+        self.refresh_worker.completed.connect(self._refresh_finished)
+        self.refresh_worker.failed.connect(self._refresh_failed)
+        self.refresh_worker.start()
+
+    def pause_refresh(self):
+        if self.refresh_worker:
+            self.refresh_worker.pause_requested = True
+            self.pause_refresh_button.setEnabled(False)
+            self.screen_status.setText('正在暂停：等待当前股票请求结束。成功更新的股票已保存，稍后可继续。')
+
+    def _refresh_controls_ready(self):
+        self.refresh_button.setEnabled(True)
+        self.pause_refresh_button.setEnabled(False)
+        self.scan_button.setEnabled(True)
+        self.last_screen_button.setEnabled(True)
+        self.export_screen_button.setEnabled(True)
+
+    def _refresh_finished(self, result):
+        cutoff, outcome = result
+        self._refresh_controls_ready()
+        if not self.screen_date.text().strip():
+            self.screen_date.setText(cutoff.isoformat())
+        state = '已暂停' if outcome.paused else '已完成'
+        self.screen_status.setText(f'{state}：目标收盘日 {cutoff}；'
+            f'更新 {outcome.updated} 只、原已最新 {outcome.skipped} 只、'
+            f'失败 {outcome.failed} 只。再次点击可续跑；完成后点击“筛选本地股票池”。')
+        if outcome.errors:
+            self.screen_details.setPlainText('行情更新错误（最多显示100只）：\n' + '\n'.join(outcome.errors))
+
+    def _refresh_failed(self, message):
+        self._refresh_controls_ready()
+        self.screen_status.setText('行情更新失败：' + message)
+        QMessageBox.warning(self, '行情更新失败', message)
+
     def _mode_changed(self):
         self.screen_result = None
         self.screen_table.setRowCount(0)
@@ -301,6 +404,7 @@ class WeeklyTrendPage(QWidget):
                 QMessageBox.warning(self, '导出失败', str(exc))
 
 
-def create_weekly_trend_page(app_dir, app_version):
+def create_weekly_trend_page(app_dir, app_version, history_fetcher=None):
     from astock_quant.desktop.weekly_trend_facade import WeeklyTrendFacade
-    return WeeklyTrendPage(WeeklyTrendFacade(Path(app_dir), app_version), Path(app_dir) / 'cache')
+    return WeeklyTrendPage(WeeklyTrendFacade(Path(app_dir), app_version),
+                           Path(app_dir) / 'cache', history_fetcher=history_fetcher)
