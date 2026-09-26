@@ -1,0 +1,188 @@
+"""Durable, per-symbol market-wide screening using the existing September rule 1."""
+
+from __future__ import annotations
+
+import csv
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
+import json
+import os
+from pathlib import Path
+from typing import Callable
+from uuid import uuid4
+
+import pandas as pd
+
+from .weekly_trend_scanner import ScreenRow, _closed_week_calendar, _three_tier_row
+from .weekly_trend_updater import merge_history, read_history, REQUIRED
+
+
+def _atomic_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name('.' + uuid4().hex + '.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as output:
+            json.dump(value, output, ensure_ascii=False, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class FullMarketResult:
+    target: date
+    source: str
+    total: int
+    completed: int
+    excluded: int
+    failed: int
+    selected: int
+    paused: bool
+    rows: tuple[ScreenRow, ...]
+
+
+class FullMarketScanner:
+    def __init__(self, app_dir: Path, *, universe_loader: Callable,
+                 history_fetcher: Callable[[str], pd.DataFrame], minimum_pool: int = 5000):
+        self.app_dir = Path(app_dir)
+        self.universe_loader = universe_loader
+        self.history_fetcher = history_fetcher
+        self.minimum_pool = minimum_pool
+        self.root = self.app_dir / 'v8_runs' / 'screens' / 'full_market'
+
+    def _run_dir(self, target: date) -> Path:
+        return self.root / target.isoformat()
+
+    def _manifest(self, target: date) -> dict:
+        manifest_path = self._run_dir(target) / 'manifest.json'
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            if manifest.get('target') != target.isoformat():
+                raise ValueError('扫描快照日期不一致')
+            return manifest
+        stocks, source = self.universe_loader()
+        stocks = sorted(stocks, key=lambda item: str(item['code']))
+        codes = [str(item['code']) for item in stocks]
+        exchanges = {str(item.get('exchange', '')) for item in stocks}
+        if len(stocks) < self.minimum_pool or len(set(codes)) != len(codes) or not {'沪', '深', '北'} <= exchanges:
+            raise ValueError(f'全A股列表不完整（{len(stocks)}只、覆盖{sorted(exchanges)}）；未开始检测，稍后重试列表接口')
+        if '过期' in source or '新浪沪深' in source:
+            raise ValueError(f'全A股列表不完整：{source}；未开始检测')
+        manifest = {'target': target.isoformat(), 'source': source, 'stocks': stocks,
+                    'created_at': datetime.now().isoformat(timespec='seconds'),
+                    'rule': '9月8日规则1', 'adjustment_basis': 'qfq'}
+        _atomic_json(manifest_path, manifest)
+        return manifest
+
+    def _history(self, code: str, target: date) -> pd.DataFrame:
+        base_path = self.app_dir / 'cache' / f'{code}.csv'
+        update_path = self.app_dir / 'v8_market_updates' / f'{code}.csv'
+        base = read_history(base_path) if base_path.exists() else None
+        overlay = read_history(update_path) if update_path.exists() else None
+        if overlay is not None and base is not None:
+            current = merge_history(base, overlay)
+        else:
+            current = overlay if overlay is not None else base
+        if current is not None and current.index[-1].date() >= target:
+            return current
+        fresh = self.history_fetcher(code)
+        if not isinstance(fresh, pd.DataFrame) or fresh.empty:
+            raise ValueError('数据源未返回日线')
+        fresh = fresh.copy().sort_index()
+        fresh.index = pd.to_datetime(fresh.index, errors='raise')
+        if fresh.index.has_duplicates or not REQUIRED <= set(fresh.columns):
+            raise ValueError('行情列缺失或日期重复')
+        if fresh.index[-1].date() < target:
+            raise ValueError(f'数据源最新日期仅到 {fresh.index[-1].date()}')
+        if base is not None:
+            merged = merge_history(base, fresh)
+        else:
+            merged = fresh
+        update_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = update_path.with_name('.' + uuid4().hex + '.tmp')
+        try:
+            with temporary.open('w', encoding='utf-8', newline='') as output:
+                fresh.to_csv(output, index_label='date')
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, update_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return merged
+
+    def _rows(self, target: date, stocks: list[dict]) -> list[ScreenRow]:
+        folder = self._run_dir(target) / 'rows'
+        rows = []
+        for stock in stocks:
+            path = folder / (stock['code'] + '.json')
+            if path.exists():
+                raw = json.loads(path.read_text(encoding='utf-8'))
+                rows.append(ScreenRow(**{**raw, 'checks': tuple(raw['checks'])}))
+        return rows
+
+    def _result(self, target: date, manifest: dict, paused: bool) -> FullMarketResult:
+        stocks = manifest['stocks']
+        rows = self._rows(target, stocks)
+        order = {'strong': 0, 'confirm': 1, 'preconfirm': 2, 'rejected': 3,
+                 'excluded': 4, 'stale': 5, 'error': 6}
+        rows.sort(key=lambda row: (order.get(row.status, 7), row.symbol))
+        return FullMarketResult(target, manifest['source'], len(stocks), len(rows),
+            sum(row.status == 'excluded' for row in rows),
+            sum(row.status in ('error', 'stale') for row in rows),
+            sum(row.status in ('strong', 'confirm', 'preconfirm') for row in rows),
+            paused, tuple(rows))
+
+    def scan(self, *, target: date, progress: Callable[[int, str], None] | None = None,
+             should_pause: Callable[[], bool] | None = None) -> FullMarketResult:
+        manifest = self._manifest(target)
+        stocks = manifest['stocks']
+        folder = self._run_dir(target) / 'rows'
+        for index, stock in enumerate(stocks):
+            if should_pause and should_pause():
+                return self._result(target, manifest, True)
+            code, name = stock['code'], stock['name']
+            path = folder / (code + '.json')
+            if path.exists():
+                saved = json.loads(path.read_text(encoding='utf-8'))
+                if saved['status'] not in ('error', 'stale'):
+                    if progress:
+                        progress(index + 1, f'已检查 {index + 1}/{len(stocks)}；{code} 已保存')
+                    continue
+            if 'ST' in name.upper().replace(' ', '') or '退' in name:
+                row = ScreenRow(code, name, 'excluded', '', None, '', 'ST或退市股票，策略排除', ())
+            else:
+                try:
+                    frame = self._history(code, target)
+                    days = {stamp.date() for stamp in frame.index if stamp.date() <= target}
+                    row = _three_tier_row(code, frame, target,
+                        _closed_week_calendar(days, target), 'qfq', name)
+                except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
+                    row = ScreenRow(code, name, 'error', '', None, '', f'行情或筛选失败：{exc}', ())
+            _atomic_json(path, asdict(row))
+            if progress:
+                progress(index + 1, f'已检查 {index + 1}/{len(stocks)}；{code} {row.status}')
+        result = self._result(target, manifest, False)
+        _atomic_json(self.root / 'latest.json', {'target': target.isoformat()})
+        return result
+
+    def open_last(self) -> FullMarketResult:
+        try:
+            target = date.fromisoformat(json.loads((self.root / 'latest.json').read_text(encoding='utf-8'))['target'])
+            manifest = json.loads((self._run_dir(target) / 'manifest.json').read_text(encoding='utf-8'))
+            return self._result(target, manifest, False)
+        except (OSError, ValueError, KeyError) as exc:
+            raise ValueError('没有已完成的全市场检测结果') from exc
+
+    def export_csv(self, path: Path) -> Path:
+        result = self.open_last()
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('w', encoding='utf-8-sig', newline='') as output:
+            writer = csv.writer(output)
+            writer.writerow(['股票代码', '股票简称', '状态', '行情日期', '收盘价', '规则', '原因'])
+            for row in result.rows:
+                writer.writerow([row.symbol, row.name, row.status, row.latest_date,
+                                 row.close if row.close is not None else '', row.setup, row.reason_zh])
+        return path
