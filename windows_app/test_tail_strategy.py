@@ -691,7 +691,7 @@ class TailUiContractTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             window = module.MainWindow()
-            self.assertEqual(module.APP_VERSION, "8.3.0")
+            self.assertEqual(module.APP_VERSION, "8.3.1")
             self.assertIn("尾盘两日短线", window.menu.items)
             self.assertTrue(hasattr(window, "tail_strategy"))
             self.assertGreaterEqual(len(window.pages.widgets), 9)
