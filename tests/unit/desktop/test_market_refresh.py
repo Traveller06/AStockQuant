@@ -121,3 +121,106 @@ def test_monday_before_close_uses_previous_friday():
     from astock_quant.desktop.weekly_trend_scanner import _safe_date
     now=datetime(2026,9,28,10,tzinfo=ZoneInfo('Asia/Shanghai'))
     assert _safe_date(now)==date(2026,9,25)
+
+
+def test_index_date_check_accepts_38_valid_rows_without_weakening_stock_history(tmp_path, monkeypatch):
+    from windows_app import main
+    monkeypatch.setattr(main, 'CACHE_DIR', tmp_path)
+    monkeypatch.setattr(main.time, 'sleep', lambda _: None)
+    dates = pd.bdate_range(end='2026-09-25', periods=38)
+    rows = [[day.strftime('%Y-%m-%d'), '10', '10', '11', '9', '100'] for day in dates]
+
+    class Response:
+        def raise_for_status(self): pass
+        def json(self): return {'data': {'sh000300': {'qfqday': rows},
+                                         'sh600000': {'qfqday': rows}}}
+
+    class Session:
+        trust_env = False
+        def get(self, *args, **kwargs): return Response()
+
+    monkeypatch.setattr(main.requests, 'Session', Session)
+    index = main.fetch_history('INDEX_000300', start_year=2026,
+        market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
+    assert len(index) == 38 and index.index[-1].date() == date(2026,9,25)
+    assert not (tmp_path / 'INDEX_000300.csv').exists()
+    try:
+        main.fetch_history('600000', start_year=2026, force_refresh=True, persist=False)
+    except RuntimeError as error:
+        assert '不足' in str(error)
+    else:
+        raise AssertionError('股票默认仍需120行有效历史数据')
+
+
+def test_full_market_worker_rejects_old_index_date(tmp_path, monkeypatch):
+    from windows_app import main
+    from astock_quant.desktop import weekly_trend_scanner
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: date(2026,9,25))
+    requested = []
+
+    def fetch(*args, **kwargs):
+        requested.append(kwargs)
+        return sample(start='2026-07-01', periods=30)
+
+    class Scanner:
+        def scan(self, **kwargs):
+            raise AssertionError('过期指数不能开始全市场选股')
+
+    monkeypatch.setattr(main, 'fetch_history', fetch)
+    worker = main.FullMarketWorker(Scanner())
+    errors = []
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert requested[0]['min_rows'] == 2
+    assert errors and '距离预期收盘日过久' in errors[0]
+
+
+def test_full_market_worker_accepts_38_recent_index_days(monkeypatch):
+    from windows_app import main
+    from astock_quant.desktop import weekly_trend_scanner
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: date(2026,9,25))
+    recent = sample(start='2026-08-05', periods=38)
+    # The index only identifies a verified closed day; the stock evaluator
+    # retains its independent history and causality requirements.
+    recent.index = pd.bdate_range(end='2026-09-25', periods=38)
+    monkeypatch.setattr(main, 'fetch_history', lambda *args, **kwargs: recent)
+
+    class Scanner:
+        def scan(self, *, target, **kwargs):
+            assert target == date(2026,9,25)
+            return 'scan-success'
+
+    worker = main.FullMarketWorker(Scanner())
+    results = []
+    worker.completed.connect(results.append)
+    worker.run()
+    assert results == ['scan-success']
+
+
+def test_weekly_refresh_uses_short_recent_index_only_for_cutoff(tmp_path, monkeypatch):
+    from windows_app.weekly_trend_page import WeeklyRefreshWorker
+    from astock_quant.desktop import weekly_trend_scanner
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: date(2026,9,25))
+    (tmp_path / 'cache').mkdir()
+    frame = sample(start='2025-01-02', periods=320)
+    frame.iloc[:-2].to_csv(tmp_path / 'cache' / '600000.csv', index_label='date')
+    index = frame.iloc[-38:]
+    index.index = pd.bdate_range(end='2026-09-25', periods=38)
+    refreshed = sample(start='2025-01-02', periods=320)
+    refreshed.index = pd.bdate_range(end='2026-09-25', periods=320)
+    calls = []
+
+    def fetch(code, **kwargs):
+        calls.append((code, kwargs))
+        if code == 'INDEX_000300':
+            assert kwargs.get('min_rows') == 2
+            return index
+        return refreshed
+
+    worker = WeeklyRefreshWorker(tmp_path, fetch, None)
+    outputs, errors = [], []
+    worker.completed.connect(outputs.append)
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert not errors
+    assert outputs and outputs[0][0] == date(2026,9,25)
