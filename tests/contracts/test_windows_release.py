@@ -13,7 +13,7 @@ def test_release_has_flat_installable_layout_and_no_user_data(tmp_path):
         assert {'main.py', 'tail_strategy.py', 'weekly_trend_page.py',
                 'astock_quant/__init__.py', '1_第一次双击_安装并打开.bat',
                 '2_以后双击_启动软件.bat', '3_双击_离线自检.bat'} <= names
-        assert 'APP_VERSION = "8.3.0"' in source.read('main.py').decode()
+        assert 'APP_VERSION = "8.3.1"' in source.read('main.py').decode()
         assert {'只看这里_v8.2_两步打开.txt', 'V8.2_三级筛选说明.txt', '只看这里_v8.2.1_两步打开.txt', 'V8.2.1_过期行情更新说明.txt'} <= names
         forbidden = {'cache', 'v8_market_updates', 'tail_strategy_cache', 'tail_strategy_state.json',
                      'v8_state', 'v8_runs', 'research_sample.json',
