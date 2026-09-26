@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.3.0"
+APP_VERSION = "8.3.1"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -380,7 +380,7 @@ def parse_eastmoney_klines(klines):
 
 
 def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_refresh=False,
-                  progress_callback=None, persist=True):
+                  progress_callback=None, persist=True, min_rows=120):
     """多源读取前复权日线：缓存、腾讯、东方财富、AKShare、BaoStock。"""
     def report(**payload):
         if progress_callback:
@@ -482,7 +482,7 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
     frame["date"] = pd.to_datetime(frame.date)
     for c in ["open","close","high","low","volume"]: frame[c] = pd.to_numeric(frame[c], errors="coerce")
     frame = frame.dropna().drop_duplicates("date").set_index("date").sort_index()
-    if len(frame) < 120: raise RuntimeError(f"有效历史行情不足：{len(frame)}行")
+    if len(frame) < min_rows: raise RuntimeError(f"有效历史行情不足：{len(frame)}行")
     frame.attrs["data_source"]=source_used; report(stage="数据源成功",source=source_used,detail=f"取得{len(frame)}行")
     if persist:
         frame.to_csv(cache_file)
@@ -1323,12 +1323,14 @@ class FullMarketWorker(QThread):
             cutoff = _safe_date()
             self.progress_changed.emit(0, '正在核实沪深300指数最近收盘日…')
             index = fetch_history('INDEX_000300', start_year=max(2018, cutoff.year-1),
-                market_symbol='sh000300', force_refresh=True, persist=False)
+                market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
             days = pd.to_datetime(index.index, errors='coerce')
             candidates = [stamp.date() for stamp in days if not pd.isna(stamp) and stamp.date() <= cutoff]
             if not candidates:
                 raise ValueError('未核实到最近已收盘交易日，无法以实时价代替收盘数据')
             target = max(candidates)
+            if (cutoff - target).days > 15:
+                raise ValueError(f'沪深300指数最新行情仅到 {target}，距离预期收盘日过久，已停止全市场检测')
             result = self.scanner.scan(target=target,
                 progress=lambda count, msg: self.progress_changed.emit(count, msg),
                 should_pause=lambda: self.pause_requested)
@@ -3291,7 +3293,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.0"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.1"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
