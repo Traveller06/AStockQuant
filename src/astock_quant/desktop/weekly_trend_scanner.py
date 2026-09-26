@@ -51,7 +51,10 @@ class ScreenResult:
 
 def _safe_date(now: datetime | None = None) -> date:
     local = now.astimezone(SHANGHAI) if now else datetime.now(SHANGHAI)
-    return local.date() if local.time() >= time(15, 30) else local.date() - timedelta(days=1)
+    cutoff = local.date() if local.time() >= time(15, 30) else local.date() - timedelta(days=1)
+    while cutoff.weekday() >= 5:
+        cutoff -= timedelta(days=1)
+    return cutoff
 
 
 def _closed_week_calendar(sessions: set[date], target: date) -> TradingCalendar:
@@ -283,13 +286,20 @@ class WeeklyTrendScanner:
                 continue
         if not dates:
             raise ValueError('缓存中没有已收盘的有效交易日，请更新行情后再筛选')
-        target = max(dates)
+        # Never relabel the newest *available* historical date as today's close.
+        # Holidays can be chosen explicitly; without an exchange calendar the
+        # latest weekday is a conservative target and missing bars stay stale.
+        target = cutoff
         calendar = _closed_week_calendar(dates, target)
         rows = []
         for index, path in enumerate(files):
             code = path.stem
             try:
                 frame = pd.read_csv(path, parse_dates=['date']).set_index('date')
+                update = self.app_dir / 'v8_market_updates' / path.name
+                if update.is_file():
+                    from .weekly_trend_updater import merge_history, read_history
+                    frame = merge_history(frame, read_history(update))
                 evaluator = _three_tier_row if self.three_tier else _row
                 row = evaluator(code, frame, target, calendar, adjustment_basis, names.get(code, code))
             except (OSError, ValueError, TypeError, KeyError, AttributeError, AStockQuantError) as exc:
