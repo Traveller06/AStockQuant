@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -14,6 +15,32 @@ from astock_quant.desktop.full_market_scanner import FullMarketScanner
 
 
 class V8OfflineTests(unittest.TestCase):
+    def test_short_index_history_allows_market_date_check_and_stock_gate_stays_120(self):
+        try:
+            from windows_app import main
+        except ImportError:
+            import main
+        days = pd.bdate_range(end='2026-09-25', periods=38)
+        bars = [[day.strftime('%Y-%m-%d'), '10', '10', '11', '9', '100'] for day in days]
+
+        class Response:
+            def raise_for_status(self): pass
+            def json(self):
+                return {'data': {'sh000300': {'qfqday': bars},
+                                 'sh600000': {'qfqday': bars}}}
+
+        class Session:
+            trust_env = False
+            def get(self, *args, **kwargs): return Response()
+
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(main.requests, 'Session', Session), patch.object(main, 'CACHE_DIR', Path(temp)):
+                index = main.fetch_history('INDEX_000300', start_year=2026,
+                    market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
+                self.assertEqual(len(index), 38)
+                with self.assertRaisesRegex(RuntimeError, '有效历史行情不足：38行'):
+                    main.fetch_history('600000', start_year=2026, force_refresh=True, persist=False)
+
     def test_full_a_share_scan_resumes_and_preserves_legacy_cache(self):
         days = pd.bdate_range('2025-01-02', periods=320)
         frame = pd.DataFrame({'open': [10.]*320, 'high': [11.]*320,
@@ -86,7 +113,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.3.0')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.1')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
