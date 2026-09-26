@@ -152,6 +152,37 @@ def test_index_date_check_accepts_38_valid_rows_without_weakening_stock_history(
         raise AssertionError('股票默认仍需120行有效历史数据')
 
 
+def test_short_tencent_history_tries_eastmoney_before_declaring_stock_unavailable(tmp_path, monkeypatch):
+    from windows_app import main
+    monkeypatch.setattr(main, 'CACHE_DIR', tmp_path)
+    monkeypatch.setattr(main.time, 'sleep', lambda _: None)
+    short = [[day.strftime('%Y-%m-%d'), '10', '10', '11', '9', '100']
+             for day in pd.bdate_range(end='2026-09-25', periods=38)]
+    complete = [','.join([day.strftime('%Y-%m-%d'), '10', '10', '11', '9', '100'])
+                for day in pd.bdate_range(end='2026-09-25', periods=180)]
+    calls = []
+
+    class Response:
+        def __init__(self, provider): self.provider = provider
+        def raise_for_status(self): pass
+        def json(self):
+            return ({'data': {'sh600000': {'qfqday': short}}}
+                    if self.provider == '腾讯' else {'data': {'klines': complete}})
+
+    class Session:
+        trust_env = False
+        def get(self, url, *args, **kwargs):
+            provider = '腾讯' if 'gtimg' in url else '东方财富'
+            calls.append(provider)
+            return Response(provider)
+
+    monkeypatch.setattr(main.requests, 'Session', Session)
+    result = main.fetch_history('600000', start_year=2026, force_refresh=True, persist=False)
+    assert len(result) == 180 and result.attrs['data_source'] == '东方财富直连'
+    assert calls == ['腾讯', '东方财富']
+    assert not (tmp_path / '600000.csv').exists()
+
+
 def test_full_market_worker_rejects_old_index_date(tmp_path, monkeypatch):
     from windows_app import main
     from astock_quant.desktop import weekly_trend_scanner
@@ -195,6 +226,26 @@ def test_full_market_worker_accepts_38_recent_index_days(monkeypatch):
     worker.completed.connect(results.append)
     worker.run()
     assert results == ['scan-success']
+
+
+def test_full_market_worker_failure_identifies_version_and_stage(monkeypatch):
+    from windows_app import main
+    from astock_quant.desktop import weekly_trend_scanner
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: date(2026,9,25))
+    monkeypatch.setattr(main, 'fetch_history', lambda *args, **kwargs:
+        sample(start='2026-08-01', periods=38).set_axis(
+            pd.bdate_range(end='2026-09-25', periods=38)))
+
+    class Scanner:
+        def scan(self, **kwargs):
+            raise RuntimeError('股票池接口连接中断')
+
+    worker = main.FullMarketWorker(Scanner())
+    errors = []
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert errors and main.APP_VERSION in errors[0]
+    assert '股票池' in errors[0]
 
 
 def test_weekly_refresh_uses_short_recent_index_only_for_cutoff(tmp_path, monkeypatch):
