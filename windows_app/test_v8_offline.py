@@ -15,6 +15,30 @@ from astock_quant.desktop.full_market_scanner import FullMarketScanner
 
 
 class V8OfflineTests(unittest.TestCase):
+    def test_short_stock_history_is_recorded_without_ending_market_scan(self):
+        days = pd.bdate_range(end='2026-09-25', periods=180)
+        frame = pd.DataFrame({'open': [10.]*180, 'high': [11.]*180,
+                              'low': [9.]*180, 'close': [10.]*180,
+                              'volume': [100.]*180}, index=days)
+        stocks = [{'code': code, 'name': name, 'exchange': market}
+                  for code, name, market in (('000001','深市','深'), ('430001','北交','北'),
+                                             ('600000','沪市','沪'))]
+
+        def fetch(code):
+            if code == '000001':
+                raise RuntimeError('腾讯:有效历史行情不足：38行')
+            return frame
+
+        with tempfile.TemporaryDirectory() as temporary:
+            scanner = FullMarketScanner(Path(temporary),
+                universe_loader=lambda: (stocks, '完整离线名单'),
+                history_fetcher=fetch, minimum_pool=3)
+            result = scanner.scan(target=days[-1].date())
+            self.assertEqual(result.completed, 3)
+            self.assertEqual(result.failed, 1)
+            self.assertTrue((Path(temporary) / 'v8_market_updates' / '600000.csv').exists())
+            self.assertEqual(scanner.open_last().completed, 3)
+
     def test_short_index_history_allows_market_date_check_and_stock_gate_stays_120(self):
         try:
             from windows_app import main
@@ -113,7 +137,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.3.1')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.2')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
