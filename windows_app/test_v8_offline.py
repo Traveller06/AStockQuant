@@ -9,6 +9,7 @@ import pandas as pd
 
 from astock_quant.desktop.weekly_trend_facade import DesktopBacktestOptions, WeeklyTrendFacade
 from astock_quant.desktop.weekly_trend_scanner import WeeklyTrendScanner
+from astock_quant.desktop.weekly_trend_updater import CachedHistoryUpdater
 
 
 class V8OfflineTests(unittest.TestCase):
@@ -35,12 +36,29 @@ class V8OfflineTests(unittest.TestCase):
             self.assertEqual(three_tier.open_last_screen().rows, graded.rows)
             self.assertEqual(scanner.open_last_screen().rows, result.rows)
 
+    def test_incremental_refresh_keeps_original_cache_and_screen_reads_update(self):
+        dates = pd.bdate_range('2025-01-02', periods=320)
+        frame = pd.DataFrame({'open':[10.]*320, 'high':[11.]*320,
+                              'low':[9.]*320, 'close':[10.]*320,
+                              'volume':[100.]*320},index=dates)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); (root/'cache').mkdir()
+            frame.iloc[:-1].to_csv(root/'cache/600000.csv', index_label='date')
+            original=(root/'cache/600000.csv').read_bytes()
+            outcome=CachedHistoryUpdater(root).refresh(
+                target=dates[-1].date(),fetcher=lambda code: frame)
+            self.assertEqual(outcome.updated,1)
+            self.assertEqual((root/'cache/600000.csv').read_bytes(),original)
+            screen=WeeklyTrendScanner(root,three_tier=True).scan_cache(
+                adjustment_basis='qfq',as_of=dates[-1].date())
+            self.assertEqual(screen.fresh_count,1)
+
     def test_run_and_reopen_audit(self):
         dates = pd.bdate_range('2025-01-02', periods=90)
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.2.0')
+            facade = WeeklyTrendFacade(Path(temporary), '8.2.1')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
