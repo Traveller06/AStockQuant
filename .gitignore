@@ -20,6 +20,8 @@ dist/
 /logs/
 /cache/
 /tail_strategy_cache/
+v8_market_updates/
+v8_runs/
 *.zip
 /paper_account.json
 /tail_strategy_state.json
