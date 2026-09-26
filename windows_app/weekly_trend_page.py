@@ -68,6 +68,7 @@ class WeeklyTrendPage(QWidget):
         self.facade, self.cache_dir = facade, Path(cache_dir)
         from astock_quant.desktop.weekly_trend_scanner import WeeklyTrendScanner
         self.scanner = WeeklyTrendScanner(self.cache_dir.parent)
+        self.three_tier_scanner = WeeklyTrendScanner(self.cache_dir.parent, three_tier=True)
         self.screen_worker = None
         self.screen_result = None
         self.worker = None
@@ -75,6 +76,10 @@ class WeeklyTrendPage(QWidget):
         root.addWidget(QLabel('周线趋势确认 · 股票池筛选与独立回测'))
         root.addWidget(QLabel('研究/模拟用途，不连接真实券商；请先在“研究样本与数据准备”准备日线。筛选只读取本地已有股票缓存。'))
         screen_controls = QHBoxLayout()
+        self.screen_mode = QComboBox()
+        self.screen_mode.addItems(['9月8日规则1：强确认 / 确认 / 预确认', 'v8.1 周线策略：当日确认 / 等待确认'])
+        self.screen_mode.currentIndexChanged.connect(self._mode_changed)
+        screen_controls.addWidget(self.screen_mode)
         screen_controls.addWidget(QLabel('筛选截止日（留空＝最新已收盘日）'))
         self.screen_date = QLineEdit('')
         self.screen_date.setPlaceholderText('如 2026-09-25，留空自动判断')
@@ -150,8 +155,9 @@ class WeeklyTrendPage(QWidget):
             QMessageBox.warning(self, '日期有误', '请使用 YYYY-MM-DD 格式，或留空自动选择最新交易日。')
             return
         self.scan_button.setEnabled(False)
+        self.screen_mode.setEnabled(False)
         self.screen_status.setText('正在读取本地股票池并计算周线形态…')
-        self.screen_worker = WeeklyScreenWorker(self.scanner, cutoff)
+        self.screen_worker = WeeklyScreenWorker(self._active_scanner(), cutoff)
         self.screen_worker.progress_changed.connect(
             lambda pct, msg: (self.progress.setValue(pct), self.screen_status.setText(msg)))
         self.screen_worker.completed.connect(self._screen_finished)
@@ -160,26 +166,38 @@ class WeeklyTrendPage(QWidget):
 
     def _screen_finished(self, result):
         self.scan_button.setEnabled(True)
+        self.screen_mode.setEnabled(True)
         self.show_screen_result(result)
 
     def _screen_failed(self, message):
         self.scan_button.setEnabled(True)
+        self.screen_mode.setEnabled(True)
         self.screen_status.setText('筛选失败：' + message)
         QMessageBox.warning(self, '筛选失败', message)
 
     def show_screen_result(self, result):
         self.screen_result = result
         stale = result.pool_size - result.fresh_count - result.error_count
+        tier = self.screen_mode.currentIndex() == 0
+        if tier:
+            counts = {key: sum(row.status == key for row in result.rows)
+                      for key in ('strong', 'confirm', 'preconfirm')}
+            summary = (f'强确认 {counts["strong"]} 只、确认 {counts["confirm"]} 只、'
+                       f'预确认 {counts["preconfirm"]} 只')
+        else:
+            summary = f'当日确认 {result.signal_count} 只、等待确认 {result.watch_count} 只'
         self.screen_status.setText(
             f'本地缓存股票池 {result.pool_size} 只；筛选截至 {result.data_as_of}；'
-            f'数据齐全 {result.fresh_count} 只、当日确认 {result.signal_count} 只、'
-            f'等待确认 {result.watch_count} 只、行情过期 {stale} 只、数据错误 {result.error_count} 只。'
+            f'数据齐全 {result.fresh_count} 只、{summary}、'
+            f'行情过期 {stale} 只、数据错误 {result.error_count} 只。'
             '筛选信号仅供研究，买入须等待下一交易日并核对涨跌停/停牌。')
-        candidates = [row for row in result.rows if row.status in ('signal', 'watch')]
+        labels = {'strong': '强确认', 'confirm': '确认', 'preconfirm': '预确认',
+                  'signal': '当日确认', 'watch': '等待确认'}
+        candidates = [row for row in result.rows if row.status in labels]
         self.screen_table.setRowCount(len(candidates))
         for index, row in enumerate(candidates):
             fields = (row.symbol, row.name,
-                      '当日确认' if row.status == 'signal' else '等待确认',
+                      labels[row.status],
                       row.latest_date, str(row.close or ''), row.setup, row.reason_zh)
             for column, value in enumerate(fields):
                 self.screen_table.setItem(index, column, QTableWidgetItem(value))
@@ -205,7 +223,7 @@ class WeeklyTrendPage(QWidget):
 
     def open_last_screen(self):
         try:
-            self.show_screen_result(self.scanner.open_last_screen())
+            self.show_screen_result(self._active_scanner().open_last_screen())
         except Exception as exc:
             QMessageBox.warning(self, '无法打开上次筛选', str(exc))
 
@@ -213,10 +231,19 @@ class WeeklyTrendPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, '导出选股结果', '周线趋势筛选.csv', 'CSV (*.csv)')
         if path:
             try:
-                self.scanner.export_csv(Path(path))
+                self._active_scanner().export_csv(Path(path))
                 self.screen_status.setText('选股结果已导出：' + path)
             except Exception as exc:
                 QMessageBox.warning(self, '导出失败', str(exc))
+
+    def _active_scanner(self):
+        return self.three_tier_scanner if self.screen_mode.currentIndex() == 0 else self.scanner
+
+    def _mode_changed(self):
+        self.screen_result = None
+        self.screen_table.setRowCount(0)
+        self.screen_details.clear()
+        self.screen_status.setText('已切换筛选方案。点击“筛选本地股票池”或“打开上次筛选”。')
 
     def run_backtest(self):
         try:
