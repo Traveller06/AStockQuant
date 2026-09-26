@@ -51,12 +51,15 @@ class WeeklyRefreshWorker(QThread):
             if self.as_of is None:
                 self.progress_changed.emit(0, '正在核实指数最近收盘日…')
                 index = self.history_fetcher('INDEX_000300', start_year=max(2018, cutoff.year-1),
-                    market_symbol='sh000300', force_refresh=True, persist=False)
+                    market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
                 days = pd.to_datetime(index.index, errors='coerce')
                 candidates = [value.date() for value in days if not pd.isna(value) and value.date() <= cutoff]
                 if not candidates:
                     raise ValueError('指数日线没有已收盘交易日；可以填写明确的历史截止日重试')
-                cutoff = max(candidates)
+                target = max(candidates)
+                if (cutoff - target).days > 15:
+                    raise ValueError(f'沪深300指数最新行情仅到 {target}，距离预期收盘日过久，已停止行情更新')
+                cutoff = target
             self.progress_changed.emit(0, f'目标收盘日 {cutoff}，开始补齐本地股票池…')
             updater = CachedHistoryUpdater(self.app_dir)
             result = updater.refresh(target=cutoff,
