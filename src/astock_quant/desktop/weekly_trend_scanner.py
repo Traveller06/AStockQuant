@@ -118,13 +118,106 @@ def _row(symbol: str, frame: pd.DataFrame, as_of: date, calendar: TradingCalenda
                      checks, signal.signal_id if signal else None)
 
 
+def classify_rule1_daily(frame: pd.DataFrame, *, weekly_candidate: bool) -> str:
+    """9 September 8 rule 1: previous closed session only; volume is an upgrade."""
+    if not weekly_candidate or len(frame) < 21:
+        return 'rejected'
+    current, previous = frame.iloc[-1], frame.iloc[-2]
+    ma5 = frame.close.iloc[-5:].mean()
+    ma20 = frame.close.iloc[-20:].mean()
+    above = current.close > ma5 and current.close > ma20
+    engulf = (previous.close < previous.open and current.close > current.open
+              and current.open <= previous.close and current.close >= previous.open)
+    if not (above and engulf):
+        return 'preconfirm'
+    prior_volume = frame.volume.iloc[-6:-1].mean()
+    return 'strong' if current.volume > prior_volume else 'confirm'
+
+
+def _legacy_candidate(bars: pd.DataFrame, target: date) -> bool:
+    """Preserve the v4.3/v7 rule 1 weekly trend calculation and 21-session window."""
+    if len(bars) < 21:
+        return False
+    weekly = bars.resample('W-FRI').agg({'open':'first', 'high':'max', 'low':'min',
+                                         'close':'last', 'volume':'sum'}).dropna()
+    # A Monday–Thursday partial week cannot establish a weekly setup.
+    if target.weekday() < 4 and len(weekly):
+        weekly = weekly.iloc[:-1]
+    for n in (5, 10, 20):
+        weekly[f'ma{n}'] = weekly.close.rolling(n).mean()
+    if len(weekly) < 21:
+        return False
+    swing_high = (weekly.high == weekly.high.rolling(5, center=True).max()).fillna(False).to_numpy()
+    swing_low = (weekly.low == weekly.low.rolling(5, center=True).min()).fillna(False).to_numpy()
+    highs = [float(weekly.high.iloc[k]) for k in range(2, min(19, len(weekly)-2)) if swing_high[k]]
+    lows = [float(weekly.low.iloc[k]) for k in range(2, min(19, len(weekly)-2)) if swing_low[k]]
+    candidates: list[date] = []
+    for j in range(20, len(weekly)):
+        current, previous = weekly.iloc[j], weekly.iloc[j-1]
+        confirmed = j-2
+        if j > 20 and swing_high[confirmed]:
+            highs.append(float(weekly.high.iloc[confirmed]))
+        if j > 20 and swing_low[confirmed]:
+            lows.append(float(weekly.low.iloc[confirmed]))
+        waves = (len(highs) >= 2 and len(lows) >= 2 and
+                 highs[-1] > highs[-2] and lows[-1] > lows[-2])
+        trend = (current.ma5 > current.ma10 > current.ma20 and
+                 current.ma5 > previous.ma5 and current.ma10 > previous.ma10 and
+                 current.ma20 > previous.ma20 and
+                 (weekly.close.iloc[j-1:j+1] > weekly.ma20.iloc[j-1:j+1]).all() and waves)
+        if trend:
+            candidates.append(weekly.index[j].date())
+    if not candidates:
+        return False
+    recent_sessions = set(bars.index[-21:].date)
+    return any(day in recent_sessions or
+               # A Friday holiday can close the week on Thursday.
+               any(0 <= (day - session).days <= 3 for session in recent_sessions)
+               for day in candidates)
+
+
+def _three_tier_row(symbol: str, frame: pd.DataFrame, as_of: date,
+                    calendar: TradingCalendar, adjustment_basis: str, name: str) -> ScreenRow:
+    market = adapt_legacy_frames({symbol: frame}, adjustment_basis=adjustment_basis, source='v7_cache')
+    if market.issues:
+        return ScreenRow(symbol, name, 'error', '', None, '', market.issues[0].message_zh, ())
+    visible = tuple(bar for bar in market.daily_bars[symbol] if bar.timestamp.date() <= as_of)
+    if not visible:
+        return ScreenRow(symbol, name, 'stale', '', None, '', '截止日之前没有有效行情', ())
+    last = visible[-1]
+    stamp = last.timestamp.date().isoformat()
+    if last.timestamp.date() < as_of:
+        return ScreenRow(symbol, name, 'stale', stamp, last.close, '', '行情早于统一筛选截止日', ())
+    daily = pd.DataFrame(({'open': b.open, 'high': b.high, 'low': b.low,
+                           'close': b.close, 'volume': b.volume} for b in visible),
+                         index=pd.DatetimeIndex([b.timestamp.date() for b in visible]))
+    candidate = _legacy_candidate(daily, as_of)
+    status = classify_rule1_daily(daily, weekly_candidate=candidate)
+    checks = ({'code': 'legacy.weekly_candidate', 'passed': candidate,
+               'actual': str(candidate), 'threshold': '20交易日内周线多头候选',
+               'reason_zh': '9月8日规则1周线候选'},
+              {'code': 'legacy.daily_rule1', 'passed': status in ('confirm','strong'),
+               'actual': status, 'threshold': '收盘站上MA5/MA20且阳包阴',
+               'reason_zh': '日线买入观察'},
+              {'code': 'legacy.volume', 'passed': status == 'strong',
+               'actual': str(float(daily.volume.iloc[-1])),
+               'threshold': '高于前5交易日平均成交量', 'reason_zh': '放量强确认'})
+    explanations = {'preconfirm': '周线候选有效，等待日线站上均线且阳包阴',
+                    'confirm': '日线确认成立；下一交易日核实可成交性',
+                    'strong': '日线确认且同日放量；下一交易日核实可成交性',
+                    'rejected': '尚无有效周线候选'}
+    return ScreenRow(symbol, name, status, stamp, last.close,
+                     '9月8日规则1' if candidate else '', explanations[status], checks)
+
+
 def _result(rows: list[ScreenRow], as_of: date, adjustment_basis: str) -> ScreenResult:
-    order = {'signal': 0, 'watch': 1, 'rejected': 2, 'stale': 3, 'error': 4}
+    order = {'strong': 0, 'confirm': 1, 'preconfirm': 2,
+             'signal': 0, 'watch': 1, 'rejected': 3, 'stale': 4, 'error': 5}
     ordered = tuple(sorted(rows, key=lambda row: (order[row.status], row.symbol)))
     return ScreenResult(as_of, datetime.now(SHANGHAI).isoformat(), len(ordered),
         sum(row.status not in ('stale', 'error') for row in ordered),
-        sum(row.status == 'signal' for row in ordered),
-        sum(row.status == 'watch' for row in ordered),
+        sum(row.status in ('signal', 'confirm', 'strong') for row in ordered),
+        sum(row.status in ('watch', 'preconfirm') for row in ordered),
         sum(row.status == 'error' for row in ordered), adjustment_basis, ordered)
 
 
@@ -161,9 +254,14 @@ def scan_weekly_frames(frames: Mapping[str, pd.DataFrame], *, adjustment_basis: 
 
 
 class WeeklyTrendScanner:
-    def __init__(self, app_dir: Path):
+    def __init__(self, app_dir: Path, *, three_tier: bool = False):
         self.app_dir = Path(app_dir)
         self.screen_dir = self.app_dir / 'v8_runs' / 'screens'
+        self.three_tier = three_tier
+
+    @property
+    def _screen_file(self) -> Path:
+        return self.screen_dir / ('latest_three_tier.json' if self.three_tier else 'latest_screen.json')
 
     def scan_cache(self, *, adjustment_basis: str, as_of: date | None = None,
                    progress: Callable[[int, str], None] | None = None) -> ScreenResult:
@@ -192,7 +290,8 @@ class WeeklyTrendScanner:
             code = path.stem
             try:
                 frame = pd.read_csv(path, parse_dates=['date']).set_index('date')
-                row = _row(code, frame, target, calendar, adjustment_basis, names.get(code, code))
+                evaluator = _three_tier_row if self.three_tier else _row
+                row = evaluator(code, frame, target, calendar, adjustment_basis, names.get(code, code))
             except (OSError, ValueError, TypeError, KeyError, AttributeError, AStockQuantError) as exc:
                 row = ScreenRow(code, names.get(code, code), 'error', '', None, '',
                                 f'读取本地行情失败：{exc}', ())
@@ -214,7 +313,7 @@ class WeeklyTrendScanner:
 
     def _save(self, result: ScreenResult) -> None:
         self.screen_dir.mkdir(parents=True, exist_ok=True)
-        output = self.screen_dir / 'latest_screen.json'
+        output = self._screen_file
         temporary = self.screen_dir / f'.{uuid4().hex}.tmp'
         try:
             with temporary.open('w', encoding='utf-8') as target:
@@ -229,7 +328,7 @@ class WeeklyTrendScanner:
 
     def open_last_screen(self) -> ScreenResult:
         try:
-            raw = json.loads((self.screen_dir / 'latest_screen.json').read_text(encoding='utf-8'))
+            raw = json.loads(self._screen_file.read_text(encoding='utf-8'))
             rows = tuple(ScreenRow(**{**item, 'checks': tuple(item['checks'])}) for item in raw['rows'])
             return ScreenResult(date.fromisoformat(raw['data_as_of']), raw['generated_at'],
                 raw['pool_size'], raw['fresh_count'], raw['signal_count'], raw['watch_count'],
@@ -245,7 +344,10 @@ class WeeklyTrendScanner:
             writer = csv.writer(output)
             writer.writerow(['股票代码','股票简称','筛选状态','行情日期','收盘价','形态','筛选说明','信号ID'])
             for row in result.rows:
-                writer.writerow([row.symbol, row.name, row.status, row.latest_date,
+                labels = {'preconfirm': '预确认', 'confirm': '确认', 'strong': '强确认',
+                          'signal': '当日确认', 'watch': '等待确认', 'stale': '行情过期',
+                          'rejected': '未入选', 'error': '数据错误'}
+                writer.writerow([row.symbol, row.name, labels.get(row.status, row.status), row.latest_date,
                                  row.close if row.close is not None else '', row.setup,
                                  row.reason_zh, row.signal_id or ''])
         return destination
