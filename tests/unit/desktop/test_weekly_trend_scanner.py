@@ -7,6 +7,45 @@ import pandas as pd
 from astock_quant.desktop.weekly_trend_scanner import WeeklyTrendScanner, scan_weekly_frames
 
 
+def test_three_tier_daily_confirmation_and_volume():
+    from astock_quant.desktop.weekly_trend_scanner import classify_rule1_daily
+    days = pd.bdate_range('2026-06-01', periods=25)
+    frame = pd.DataFrame({'open': [10.] * 25, 'close': [10.1] * 25,
+                          'volume': [100.] * 25}, index=days)
+    assert classify_rule1_daily(frame, weekly_candidate=True) == 'preconfirm'
+    frame.loc[days[-2], ['open', 'close']] = [11., 10.]
+    frame.loc[days[-1], ['open', 'close']] = [9.9, 11.1]
+    assert classify_rule1_daily(frame, weekly_candidate=True) == 'confirm'
+    frame.loc[days[-1], 'volume'] = 200.
+    assert classify_rule1_daily(frame, weekly_candidate=True) == 'strong'
+    assert classify_rule1_daily(frame, weekly_candidate=False) == 'rejected'
+
+
+def test_three_tier_scanner_keeps_independent_results_and_stale_stock(tmp_path, monkeypatch):
+    from astock_quant.desktop import weekly_trend_scanner as module
+    frame = rising_setup()
+    (tmp_path / 'cache').mkdir()
+    frame.to_csv(tmp_path / 'cache' / '600000.csv', index_label='date')
+    frame.iloc[:-1].to_csv(tmp_path / 'cache' / '600001.csv', index_label='date')
+    monkeypatch.setattr(module, '_legacy_candidate', lambda bars, target: True)
+    scanner = WeeklyTrendScanner(tmp_path, three_tier=True)
+    result = scanner.scan_cache(adjustment_basis='qfq', as_of=frame.index[-1].date())
+    assert result.rows[0].status == 'preconfirm'
+    assert {row.symbol: row.status for row in result.rows}['600001'] == 'stale'
+    assert scanner.open_last_screen().rows == result.rows
+    assert not (tmp_path / 'v8_runs/screens/latest_screen.json').exists()
+    assert '预确认' in scanner.export_csv(tmp_path / 'three_tier.csv').read_text(encoding='utf-8-sig')
+
+
+def test_september_weekly_candidate_uses_only_completed_weeks():
+    from astock_quant.desktop.weekly_trend_scanner import _legacy_candidate
+    prior = rising_setup()
+    assert _legacy_candidate(prior, prior.index[-1].date())
+    monday = pd.DataFrame([{'open':1., 'high':1.1, 'low':.9, 'close':1.,
+                            'volume':1e9}], index=pd.to_datetime(['2026-06-29']))
+    assert _legacy_candidate(pd.concat([prior, monday]), date(2026, 6, 29))
+
+
 def rising_setup():
     sessions = [date(2026, 1, 9) + timedelta(days=7 * index) for index in range(25)]
     rows = []
