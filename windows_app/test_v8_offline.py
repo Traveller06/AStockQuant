@@ -10,9 +10,37 @@ import pandas as pd
 from astock_quant.desktop.weekly_trend_facade import DesktopBacktestOptions, WeeklyTrendFacade
 from astock_quant.desktop.weekly_trend_scanner import WeeklyTrendScanner
 from astock_quant.desktop.weekly_trend_updater import CachedHistoryUpdater
+from astock_quant.desktop.full_market_scanner import FullMarketScanner
 
 
 class V8OfflineTests(unittest.TestCase):
+    def test_full_a_share_scan_resumes_and_preserves_legacy_cache(self):
+        days = pd.bdate_range('2025-01-02', periods=320)
+        frame = pd.DataFrame({'open': [10.]*320, 'high': [11.]*320,
+                              'low': [9.]*320, 'close': [10.]*320,
+                              'volume': [100.]*320}, index=days)
+        stocks = [{'code': code, 'name': name, 'exchange': market}
+                  for code, name, market in (('600000','浦发','沪'), ('000001','平安','深'),
+                                             ('430001','北交','北'), ('600001','*ST测试','沪'))]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); (root / 'cache').mkdir()
+            frame.iloc[:-3].to_csv(root / 'cache' / '600000.csv', index_label='date')
+            original = (root / 'cache' / '600000.csv').read_bytes()
+            fetched = []
+            def fetch(code):
+                fetched.append(code)
+                return frame
+            scanner = FullMarketScanner(root, universe_loader=lambda: (stocks,'离线完整股票池'),
+                                        history_fetcher=fetch, minimum_pool=3)
+            partial = scanner.scan(target=days[-1].date(),
+                                   should_pause=lambda: len(fetched) >= 1)
+            self.assertTrue(partial.paused)
+            result = scanner.scan(target=days[-1].date())
+            self.assertEqual((result.total, result.completed, result.excluded), (4,4,1))
+            self.assertEqual(len(fetched), 3)
+            self.assertEqual((root / 'cache' / '600000.csv').read_bytes(), original)
+            self.assertEqual(scanner.open_last().total, 4)
+
     def test_cached_stock_pool_produces_a_weekly_watch_and_saves_result(self):
         days = [date(2026, 1, 9) + timedelta(days=7 * index) for index in range(25)]
         closes = [10.0 + index * 0.4 for index in range(25)]
@@ -58,7 +86,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.2.1')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.0')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
