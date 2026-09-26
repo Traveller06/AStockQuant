@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.2.1"
+APP_VERSION = "8.3.0"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -133,11 +133,11 @@ def fetch_quotes(codes):
 def valid_a_share(code):
     """仅保留沪、深、北交易所普通A股常见代码段。"""
     return len(code) == 6 and code.isdigit() and code.startswith((
-        "600","601","603","605","688", "000","001","002","003","300","301",
+        "600","601","603","605","688","689", "000","001","002","003","300","301",
         "4","8","9"))
 
 
-def clean_universe(rows):
+def clean_universe(rows, *, include_st=False):
     cleaned = {}
     for row in rows:
         code = str(row.get("code", "")).split(".")[0].zfill(6)
@@ -145,7 +145,7 @@ def clean_universe(rows):
         if not valid_a_share(code) or not name:
             continue
         upper = name.upper().replace(" ", "")
-        if "ST" in upper or "退" in name:
+        if not include_st and ("ST" in upper or "退" in name):
             continue
         exchange = "沪" if code.startswith("6") else ("深" if code.startswith(("0","3")) else "北")
         cleaned[code] = {"code":code, "name":name, "exchange":exchange}
@@ -169,14 +169,14 @@ def fetch_sina_universe():
     return rows
 
 
-def fetch_market_universe(force=False):
+def fetch_market_universe(force=False, *, include_st=False, persist=True):
     """获取全A列表并按日缓存；优先AKShare全A接口，失败后使用新浪沪深接口。"""
     today = datetime.now().strftime("%Y-%m-%d")
     if UNIVERSE_FILE.exists() and not force:
         try:
             payload = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8"))
-            stocks = clean_universe(payload.get("stocks", []))
-            if stocks and payload.get("updated") == today:
+            stocks = clean_universe(payload.get("stocks", []), include_st=include_st)
+            if stocks and payload.get("updated") == today and (not include_st or payload.get("includes_st")):
                 return stocks, "今日本地股票池"
         except Exception:
             pass
@@ -204,17 +204,18 @@ def fetch_market_universe(force=False):
             rows.extend(fetch_sina_universe()); sources.append("新浪沪深")
         except Exception as exc:
             failures.append("新浪:" + str(exc)[:80])
-    stocks = clean_universe(rows)
+    stocks = clean_universe(rows, include_st=True)
     if not stocks and UNIVERSE_FILE.exists():
         try:
-            old = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8")); stocks = clean_universe(old.get("stocks", []))
-            if stocks: return stocks, "过期本地股票池（在线更新失败）"
+            old = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8")); stocks = clean_universe(old.get("stocks", []), include_st=include_st)
+            if stocks and not include_st: return stocks, "过期本地股票池（在线更新失败）"
         except Exception: pass
     if not stocks:
         raise RuntimeError("全市场股票列表读取失败：" + "；".join(failures))
-    payload = {"updated":today, "source":"+".join(sources), "stocks":stocks}
-    temporary = UNIVERSE_FILE.with_suffix(".tmp"); temporary.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8"); temporary.replace(UNIVERSE_FILE)
-    return stocks, payload["source"]
+    payload = {"updated":today, "source":"+".join(sources), "stocks":stocks, "includes_st":True}
+    if persist:
+        temporary = UNIVERSE_FILE.with_suffix(".tmp"); temporary.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8"); temporary.replace(UNIVERSE_FILE)
+    return clean_universe(stocks, include_st=include_st), payload["source"]
 
 
 def stratified_research_sample(stocks, size=300):
@@ -1306,6 +1307,36 @@ def evaluate_entry_rules(frames, market_flags, initial, historical_years, forwar
     return {"summary":summary,"annual":annual,"cache":cache}
 
 
+class FullMarketWorker(QThread):
+    progress_changed = Signal(int, str)
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, scanner):
+        super().__init__()
+        self.scanner = scanner
+        self.pause_requested = False
+
+    def run(self):
+        try:
+            from astock_quant.desktop.weekly_trend_scanner import _safe_date
+            cutoff = _safe_date()
+            self.progress_changed.emit(0, '正在核实沪深300指数最近收盘日…')
+            index = fetch_history('INDEX_000300', start_year=max(2018, cutoff.year-1),
+                market_symbol='sh000300', force_refresh=True, persist=False)
+            days = pd.to_datetime(index.index, errors='coerce')
+            candidates = [stamp.date() for stamp in days if not pd.isna(stamp) and stamp.date() <= cutoff]
+            if not candidates:
+                raise ValueError('未核实到最近已收盘交易日，无法以实时价代替收盘数据')
+            target = max(candidates)
+            result = self.scanner.scan(target=target,
+                progress=lambda count, msg: self.progress_changed.emit(count, msg),
+                should_pause=lambda: self.pause_requested)
+            self.completed.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class KlinePage(QWidget):
     def __init__(self):
         super().__init__(); self.worker = None
@@ -1322,7 +1353,111 @@ class KlinePage(QWidget):
         self.rules = QTableWidget(0, 2); self.rules.setHorizontalHeaderLabels(["策略条件", "结果"]); self.rules.horizontalHeader().setStretchLastSection(True)
         self.rules.verticalHeader().setVisible(False); self.rules.setColumnWidth(0, 255); side_layout.addWidget(self.rules); split.addWidget(side); split.setSizes([760, 440]); root.addWidget(split)
         self.status = QLabel("输入股票代码后加载历史行情"); root.addWidget(self.status)
+        from astock_quant.desktop.full_market_scanner import FullMarketScanner
+        self.full_scanner = FullMarketScanner(APP_DIR,
+            universe_loader=lambda: fetch_market_universe(force=True, include_st=True, persist=False),
+            history_fetcher=lambda code: fetch_history(code, start_year=max(2018, datetime.now().year-2),
+                force_refresh=True, persist=False))
+        self.full_worker = None
+        full_controls = QHBoxLayout()
+        self.full_scan_btn = QPushButton('一键检测全A股（9月8日规则1）')
+        self.full_pause_btn = QPushButton('暂停检测'); self.full_pause_btn.setEnabled(False)
+        self.full_open_btn = QPushButton('打开上次全A股结果')
+        self.full_export_btn = QPushButton('导出全A股 CSV')
+        for button, callback in ((self.full_scan_btn, self.start_full_scan),
+                                 (self.full_pause_btn, self.pause_full_scan),
+                                 (self.full_open_btn, self.open_full_scan),
+                                 (self.full_export_btn, self.export_full_scan)):
+            button.clicked.connect(callback); full_controls.addWidget(button)
+        root.addLayout(full_controls)
+        self.full_progress = QProgressBar(); self.full_progress.setRange(0, 100); root.addWidget(self.full_progress)
+        self.full_status = QLabel('全A股检测会先核实股票列表和最新收盘日，逐只保存进度；完成前结果标为部分结果。')
+        self.full_status.setWordWrap(True); root.addWidget(self.full_status)
+        self.full_table = QTableWidget(0, 6)
+        self.full_table.setHorizontalHeaderLabels(['股票代码', '股票简称', '分级', '行情日期', '收盘价', '筛选说明'])
+        self.full_table.verticalHeader().setVisible(False)
+        self.full_table.horizontalHeader().setStretchLastSection(True)
+        self.full_table.setMaximumHeight(230)
+        self.full_table.cellDoubleClicked.connect(self.open_full_stock)
+        root.addWidget(self.full_table)
         self.period.currentIndexChanged.connect(self.redraw); self.day = self.week = self.result = None
+
+    def start_full_scan(self):
+        if self.full_worker is not None and self.full_worker.isRunning():
+            return
+        self.full_scan_btn.setEnabled(False); self.full_pause_btn.setEnabled(True)
+        self.full_progress.setRange(0, 0)
+        self.full_status.setText('正在核实全A股列表和指数收盘日…')
+        self.full_worker = FullMarketWorker(self.full_scanner)
+        self.full_worker.progress_changed.connect(self.full_progress_update)
+        self.full_worker.completed.connect(self.full_scan_completed)
+        self.full_worker.failed.connect(self.full_scan_failed)
+        self.full_worker.start()
+
+    def pause_full_scan(self):
+        if self.full_worker is not None:
+            self.full_worker.pause_requested = True
+            self.full_status.setText('正在保存当前股票结果并暂停…')
+
+    def full_progress_update(self, count, message):
+        import re
+        progress = re.search(r'已检查 (\d+)/(\d+)', message)
+        if progress:
+            self.full_progress.setRange(0, int(progress.group(2)))
+            self.full_progress.setValue(int(progress.group(1)))
+        self.full_status.setText(message)
+
+    def full_scan_completed(self, result):
+        self.full_scan_btn.setEnabled(True); self.full_pause_btn.setEnabled(False)
+        self.full_scan_btn.setText('继续检测全A股' if result.paused else '检查并重试失败股票')
+        self.show_full_result(result)
+
+    def full_scan_failed(self, message):
+        self.full_scan_btn.setEnabled(True); self.full_pause_btn.setEnabled(False)
+        self.full_progress.setRange(0, 100)
+        self.full_status.setText('全A股检测中断：' + message + '；已保存的股票可再次点击续跑。')
+        QMessageBox.warning(self, '全A股检测中断', message)
+
+    def show_full_result(self, result):
+        counts = {status: sum(row.status == status for row in result.rows)
+                  for status in ('strong', 'confirm', 'preconfirm', 'stale')}
+        self.full_progress.setRange(0, result.total)
+        self.full_progress.setValue(result.completed)
+        label = '已暂停，结果未完成' if result.paused else ('已完成，有数据缺口' if result.failed else '已完成')
+        self.full_status.setText(
+            f'{label}｜股票池 {result.total} 只｜已处理 {result.completed} 只｜'
+            f'强确认 {counts["strong"]}、确认 {counts["confirm"]}、预确认 {counts["preconfirm"]}｜'
+            f'ST/退市排除 {result.excluded}｜数据失败 {result.failed}（含过期 {counts["stale"]}）｜'
+            f'截止日 {result.target}｜来源 {result.source}。双击入选股票查看K线；仅供研究，不自动下单。')
+        labels = {'strong': '强确认', 'confirm': '确认', 'preconfirm': '预确认'}
+        selected = [row for row in result.rows if row.status in labels]
+        self.full_table.setRowCount(len(selected))
+        for index, row in enumerate(selected):
+            for column, value in enumerate((row.symbol, row.name, labels[row.status],
+                                             row.latest_date, str(row.close or ''), row.reason_zh)):
+                self.full_table.setItem(index, column, QTableWidgetItem(value))
+
+    def open_full_scan(self):
+        try:
+            self.show_full_result(self.full_scanner.open_last())
+        except Exception as exc:
+            QMessageBox.warning(self, '无法打开上次全A股结果', str(exc))
+
+    def export_full_scan(self):
+        path, _ = QFileDialog.getSaveFileName(self, '导出全A股逐只检查结果',
+            str(APP_DIR / '全A股规则1筛选.csv'), 'CSV (*.csv)')
+        if path:
+            try:
+                self.full_scanner.export_csv(Path(path))
+                self.full_status.setText('已导出：' + path)
+            except Exception as exc:
+                QMessageBox.warning(self, '导出失败', str(exc))
+
+    def open_full_stock(self, row, column):
+        item = self.full_table.item(row, 0)
+        if item is not None:
+            self.code.setText(item.text())
+            self.load()
 
     def load(self):
         code = self.code.text().strip()
@@ -3141,6 +3276,12 @@ class TailStrategyPage(QWidget):
 
 class MainWindow(QMainWindow):
     def closeEvent(self, event):
+        full_worker = getattr(getattr(self, 'kline', None), 'full_worker', None)
+        if full_worker is not None and full_worker.isRunning():
+            full_worker.pause_requested = True
+            event.ignore()
+            QTimer.singleShot(800, self.close)
+            return
         worker = getattr(getattr(self, 'weekly_trend', None), 'refresh_worker', None)
         if worker is not None and worker.isRunning():
             worker.pause_requested = True
@@ -3150,7 +3291,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.2.1"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.0"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
