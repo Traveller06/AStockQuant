@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.3.3"
+APP_VERSION = "8.3.4"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -189,14 +189,6 @@ def fetch_market_universe(force=False, *, include_st=False, persist=True):
         if code_col is None or name_col is None: raise ValueError("全A列表字段无法识别")
         rows.extend({"code":str(r[code_col]),"name":str(r[name_col])} for _,r in frame.iterrows())
         sources.append("AKShare全A")
-        if not any(str(r["code"]).split(".")[0].zfill(6).startswith(("4","8","9")) for r in rows):
-            try:
-                bj=ak.stock_info_bj_name_code()
-                bj_code=next((c for c in bj.columns if str(c) in ("code","代码","证券代码")),None)
-                bj_name=next((c for c in bj.columns if str(c) in ("name","名称","证券简称")),None)
-                if bj_code is not None and bj_name is not None:
-                    rows.extend({"code":str(r[bj_code]),"name":str(r[bj_name])} for _,r in bj.iterrows()); sources.append("北交所列表")
-            except Exception: pass
     except Exception as exc:
         failures.append("AKShare:" + str(exc)[:80])
     if not rows:
@@ -204,6 +196,19 @@ def fetch_market_universe(force=False, *, include_st=False, persist=True):
             rows.extend(fetch_sina_universe()); sources.append("新浪沪深")
         except Exception as exc:
             failures.append("新浪:" + str(exc)[:80])
+    if not any(str(row['code']).split('.')[0].zfill(6).startswith(('4','8','9')) for row in rows):
+        try:
+            from astock_quant.data.market_universe import fetch_bse_universe
+            rows.extend(fetch_bse_universe()); sources.append('北交所官网直连')
+        except Exception as exc:
+            failures.append('北交所直连:' + str(exc)[:100])
+            try:
+                import akshare as ak
+                bj = ak.stock_info_bj_name_code()
+                rows.extend({'code':str(row['证券代码']), 'name':str(row['证券简称'])} for _,row in bj.iterrows())
+                sources.append('北交所兼容层')
+            except Exception as backup:
+                failures.append('北交所兼容层:' + str(backup)[:100])
     stocks = clean_universe(rows, include_st=True)
     if not stocks and UNIVERSE_FILE.exists():
         try:
@@ -212,7 +217,7 @@ def fetch_market_universe(force=False, *, include_st=False, persist=True):
         except Exception: pass
     if not stocks:
         raise RuntimeError("全市场股票列表读取失败：" + "；".join(failures))
-    payload = {"updated":today, "source":"+".join(sources), "stocks":stocks, "includes_st":True}
+    payload = {"updated":today, "source":"+".join(sources) + ("；列表接口异常："+"；".join(failures) if failures else ""), "stocks":stocks, "includes_st":True}
     if persist:
         temporary = UNIVERSE_FILE.with_suffix(".tmp"); temporary.write_text(json.dumps(payload,ensure_ascii=False),encoding="utf-8"); temporary.replace(UNIVERSE_FILE)
     return clean_universe(stocks, include_st=include_st), payload["source"]
@@ -1492,6 +1497,8 @@ class KlinePage(QWidget):
         self.full_progress.setRange(0, result.total)
         self.full_progress.setValue(result.completed)
         label = '已暂停，结果未完成' if result.paused else ('已完成，有数据缺口' if result.failed else '已完成')
+        if not result.universe_verified:
+            label = '已暂停，名册待更新' if result.paused else '已检测已知股票，名册待更新（可能缺少近期新股）'
         self.full_status.setText(
             f'{label}｜股票池 {result.total} 只｜已处理 {result.completed} 只｜'
             f'有效行情 {valid} 只｜入选 {result.selected} 只｜历史不足 {counts["insufficient"]} 只｜'
@@ -3371,7 +3378,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.3"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.4"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
