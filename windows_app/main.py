@@ -50,7 +50,7 @@ VALIDATION_SNAPSHOT_FILE = APP_DIR / "validation_snapshot_v1.json.gz"
 VALIDATION_ENGINE_VERSION = "7.5-worldquant-ranking-v1"
 TAIL_CACHE_DIR = APP_DIR / "tail_strategy_cache"
 TAIL_STATE_FILE = APP_DIR / "tail_strategy_state.json"
-APP_VERSION = "8.3.2"
+APP_VERSION = "8.3.3"
 ENTRY_RULES = ("1 推荐", "2 严格", "3 折中", "4 世坤因子")
 
 INDUSTRY_MAP = {
@@ -380,7 +380,7 @@ def parse_eastmoney_klines(klines):
 
 
 def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_refresh=False,
-                  progress_callback=None, persist=True, min_rows=120):
+                  progress_callback=None, persist=True, min_rows=120, minimum_as_of=None):
     """多源读取前复权日线：缓存、腾讯、东方财富、AKShare、BaoStock。"""
     def report(**payload):
         if progress_callback:
@@ -392,7 +392,7 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             cached = pd.read_csv(cache_file, parse_dates=["date"]).set_index("date").sort_index()
             recent_enough = (pd.Timestamp.now().normalize() - cached.index[-1]).days <= 10
             starts_early = cached.index[0].year <= start_year
-            if recent_enough and starts_early and len(cached) >= 120:
+            if recent_enough and starts_early and len(cached) >= min_rows and (minimum_as_of is None or cached.index[-1].date() >= minimum_as_of):
                 cached.attrs["data_source"]="本地缓存"
                 report(stage="使用本地缓存", source="本地缓存")
                 return cached
@@ -411,6 +411,10 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             candidate = candidate.dropna().drop_duplicates('date').set_index('date').sort_index()
             if len(candidate) < min_rows:
                 raise ValueError(f'有效历史行情不足：{len(candidate)}行')
+            if minimum_as_of is not None and candidate.index[-1].date() < minimum_as_of:
+                raise ValueError(f'行情仅到{candidate.index[-1].date()}，要求{minimum_as_of}')
+            if (candidate[['open','close','high','low']] <= 0).any().any():
+                raise ValueError('行情含非正价格')
             return candidate
         except (KeyError, ValueError, TypeError) as exc:
             source_errors.append(source + ':' + str(exc)[:100])
@@ -418,6 +422,8 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             return None
     current_year = datetime.now().year
     try:
+        if s.startswith('bj'):
+            raise RuntimeError('腾讯历史接口不支持北交所，直接使用备用源')
         for year in range(start_year, current_year + 1, 2):
             start, end = f"{year}-01-01", f"{min(year+1,current_year)}-12-31"
             for attempt in range(1, 4):
@@ -458,6 +464,24 @@ def fetch_history(code, count=1000, start_year=2018, market_symbol=None, force_r
             if frame is not None: source_used='东方财富直连'
         except Exception as exc:
             source_errors.append("东方财富直连:"+str(exc)[:100]); frame=None
+
+    if frame is None and market_symbol:
+        try:
+            from astock_quant.data.sina_daily import fetch_sina_index
+            report(stage="切换独立指数源", source="新浪指数", request=1)
+            frame = usable(fetch_sina_index(s, session, start_year), '新浪指数')
+            if frame is not None: source_used = '新浪指数'
+        except Exception as exc:
+            source_errors.append('新浪指数:' + str(exc)[:100]); frame = None
+
+    if frame is None and not market_symbol:
+        try:
+            from astock_quant.data.sina_daily import fetch_sina_daily
+            report(stage="切换独立历史源", source="新浪前复权", request=1)
+            frame = usable(fetch_sina_daily(s, session, start_year), '新浪前复权')
+            if frame is not None: source_used = '新浪前复权'
+        except Exception as exc:
+            source_errors.append('新浪前复权:' + str(exc)[:100]); frame = None
 
     if frame is None:
         try:
@@ -1330,19 +1354,23 @@ class FullMarketWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, scanner):
+    def __init__(self, scanner, requested_target=None):
         super().__init__()
         self.scanner = scanner
+        self.requested_target = requested_target
         self.pause_requested = False
 
     def run(self):
         stage = '核实沪深300收盘日'
         try:
             from astock_quant.desktop.weekly_trend_scanner import _safe_date
-            cutoff = _safe_date()
+            safe = _safe_date()
+            cutoff = self.requested_target or safe
+            if cutoff > safe:
+                raise ValueError('截止日尚未收盘，不能检测未来行情')
             self.progress_changed.emit(0, '正在核实沪深300指数最近收盘日…')
             index = fetch_history('INDEX_000300', start_year=max(2018, cutoff.year-1),
-                market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
+                market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2, minimum_as_of=cutoff)
             days = pd.to_datetime(index.index, errors='coerce')
             candidates = [stamp.date() for stamp in days if not pd.isna(stamp) and stamp.date() <= cutoff]
             if not candidates:
@@ -1376,10 +1404,11 @@ class KlinePage(QWidget):
         self.rules.verticalHeader().setVisible(False); self.rules.setColumnWidth(0, 255); side_layout.addWidget(self.rules); split.addWidget(side); split.setSizes([760, 440]); root.addWidget(split)
         self.status = QLabel("输入股票代码后加载历史行情"); root.addWidget(self.status)
         from astock_quant.desktop.full_market_scanner import FullMarketScanner
+        from astock_quant.desktop.weekly_trend_scanner import _safe_date
         self.full_scanner = FullMarketScanner(APP_DIR,
             universe_loader=lambda: fetch_market_universe(force=True, include_st=True, persist=False),
             history_fetcher=lambda code: fetch_history(code, start_year=max(2018, datetime.now().year-2),
-                force_refresh=True, persist=False))
+                force_refresh=True, persist=False, min_rows=2, minimum_as_of=self.full_scanner.active_target))
         self.full_worker = None
         full_controls = QHBoxLayout()
         self.full_scan_btn = QPushButton('一键检测全A股（9月8日规则1）')
@@ -1391,7 +1420,17 @@ class KlinePage(QWidget):
                                  (self.full_open_btn, self.open_full_scan),
                                  (self.full_export_btn, self.export_full_scan)):
             button.clicked.connect(callback); full_controls.addWidget(button)
+        self.full_filter = QComboBox()
+        self.full_filter.addItems(['全部股票', '入选股票', '数据失败', '历史不足', '未入选', '策略排除'])
+        self.full_filter.currentIndexChanged.connect(self.render_full_rows)
+        self.full_result = None
+        full_controls.addWidget(self.full_filter)
         root.addLayout(full_controls)
+        date_controls = QHBoxLayout()
+        date_controls.addWidget(QLabel('截止日（留空自动核实；节假日可填最近交易日）'))
+        self.full_date = QLineEdit(); self.full_date.setPlaceholderText('YYYY-MM-DD，可选')
+        self.full_date.setMaximumWidth(220); date_controls.addWidget(self.full_date); date_controls.addStretch()
+        root.addLayout(date_controls)
         self.full_progress = QProgressBar(); self.full_progress.setRange(0, 100); root.addWidget(self.full_progress)
         self.full_status = QLabel('全A股检测会先核实股票列表和最新收盘日，逐只保存进度；完成前结果标为部分结果。')
         self.full_status.setWordWrap(True); root.addWidget(self.full_status)
@@ -1407,10 +1446,15 @@ class KlinePage(QWidget):
     def start_full_scan(self):
         if self.full_worker is not None and self.full_worker.isRunning():
             return
+        try:
+            requested = datetime.strptime(self.full_date.text().strip(), '%Y-%m-%d').date() if self.full_date.text().strip() else None
+        except ValueError:
+            QMessageBox.warning(self, '截止日格式错误', '请填写 YYYY-MM-DD，或留空自动核实')
+            return
         self.full_scan_btn.setEnabled(False); self.full_pause_btn.setEnabled(True)
         self.full_progress.setRange(0, 0)
         self.full_status.setText('正在核实全A股列表和指数收盘日…')
-        self.full_worker = FullMarketWorker(self.full_scanner)
+        self.full_worker = FullMarketWorker(self.full_scanner, requested_target=requested)
         self.full_worker.progress_changed.connect(self.full_progress_update)
         self.full_worker.completed.connect(self.full_scan_completed)
         self.full_worker.failed.connect(self.full_scan_failed)
@@ -1442,17 +1486,31 @@ class KlinePage(QWidget):
 
     def show_full_result(self, result):
         counts = {status: sum(row.status == status for row in result.rows)
-                  for status in ('strong', 'confirm', 'preconfirm', 'stale')}
+                  for status in ('strong', 'confirm', 'preconfirm', 'stale', 'insufficient')}
+        self.full_result = result
+        valid = sum(row.status in ('strong','confirm','preconfirm','rejected','insufficient') for row in result.rows)
         self.full_progress.setRange(0, result.total)
         self.full_progress.setValue(result.completed)
         label = '已暂停，结果未完成' if result.paused else ('已完成，有数据缺口' if result.failed else '已完成')
         self.full_status.setText(
             f'{label}｜股票池 {result.total} 只｜已处理 {result.completed} 只｜'
+            f'有效行情 {valid} 只｜入选 {result.selected} 只｜历史不足 {counts["insufficient"]} 只｜'
             f'强确认 {counts["strong"]}、确认 {counts["confirm"]}、预确认 {counts["preconfirm"]}｜'
             f'ST/退市排除 {result.excluded}｜数据失败 {result.failed}（含过期 {counts["stale"]}）｜'
-            f'截止日 {result.target}｜来源 {result.source}。双击入选股票查看K线；仅供研究，不自动下单。')
-        labels = {'strong': '强确认', 'confirm': '确认', 'preconfirm': '预确认'}
-        selected = [row for row in result.rows if row.status in labels]
+            f'截止日 {result.target}｜来源 {result.source}。下方默认显示全部股票，可按状态查看；双击查看K线；仅供研究，不自动下单。')
+        self.render_full_rows()
+
+    def render_full_rows(self):
+        result = self.full_result
+        if result is None:
+            return
+        labels = {'strong': '强确认', 'confirm': '确认', 'preconfirm': '预确认',
+                  'rejected': '未入选', 'error': '数据失败', 'stale': '行情过期',
+                  'excluded': '策略排除', 'insufficient': '历史不足'}
+        groups = {'入选股票': ('strong','confirm','preconfirm'), '数据失败': ('error','stale'),
+                  '历史不足': ('insufficient',), '未入选': ('rejected',), '策略排除': ('excluded',)}
+        statuses = groups.get(self.full_filter.currentText())
+        selected = [row for row in result.rows if statuses is None or row.status in statuses]
         self.full_table.setRowCount(len(selected))
         for index, row in enumerate(selected):
             for column, value in enumerate((row.symbol, row.name, labels[row.status],
@@ -3313,7 +3371,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def __init__(self):
-        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.2"); self.resize(1540,920)
+        super().__init__(); self.setWindowTitle("A股个人量化交易系统 v8.3.3"); self.resize(1540,920)
         root=QWidget(); layout=QHBoxLayout(root); layout.setContentsMargins(0,0,0,0)
         self.menu=QListWidget(); self.menu.setFixedWidth(210); self.menu.addItems(["行情与K线","策略规则说明","单股历史回测","批量独立回测","共享资金组合","研究样本与数据准备","牛熊双引擎验证","尾盘两日短线","周线趋势确认","风险控制"]); layout.addWidget(self.menu)
         self.pages=QStackedWidget(); self.kline=KlinePage(); self.pages.addWidget(self.kline)
