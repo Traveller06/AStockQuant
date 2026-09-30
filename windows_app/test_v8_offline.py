@@ -138,7 +138,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.3.3')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.4')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
