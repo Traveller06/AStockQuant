@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title AStockQuant v8.3.3
+title AStockQuant v8.3.4
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\pythonw.exe" (
