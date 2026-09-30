@@ -118,3 +118,107 @@ def test_full_universe_keeps_st_and_does_not_overwrite_legacy_pool(tmp_path, mon
     stocks, source = main.fetch_market_universe(force=True, include_st=True, persist=False)
     assert len(stocks) == 4 and any(row['name'] == '*ST样本' for row in stocks)
     assert original.read_text(encoding='utf-8') == '{"user":"legacy"}'
+
+
+def test_short_new_listing_data_saved_and_reported_separately_from_download_failure(tmp_path):
+    scanner = FullMarketScanner(tmp_path, universe_loader=universe,
+        history_fetcher=lambda code: bars().iloc[-38:] if code == '000001' else bars(), minimum_pool=3)
+    result = scanner.scan(target=TARGET)
+    row = next(row for row in result.rows if row.symbol == '000001')
+    assert row.status == 'insufficient'
+    assert row.latest_date == '2026-09-25' and row.close == 10
+    assert result.failed == 0
+    assert (tmp_path / 'v8_market_updates' / '000001.csv').exists()
+
+
+def test_all_rows_view_keeps_rejected_and_failed_stocks_visible(tmp_path, monkeypatch):
+    from windows_app import main
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(main, 'APP_DIR', tmp_path)
+    scanner = FullMarketScanner(tmp_path, universe_loader=universe,
+        history_fetcher=lambda code: bars().iloc[:-1] if code == '430001' else bars(), minimum_pool=3)
+    result = scanner.scan(target=TARGET)
+    page = main.KlinePage()
+    page.show_full_result(result)
+    assert page.full_table.rowCount() == 4
+    assert '有效行情 2' in page.full_status.text()
+    page.full_filter.setCurrentText('数据失败')
+    assert page.full_table.rowCount() == 1
+    assert page.full_table.item(0,0).text() == '430001'
+    page.full_filter.setCurrentText('入选股票')
+    assert page.full_table.rowCount() == 0
+    page.close()
+
+
+def test_beijing_uses_independent_sina_fallback_when_eastmoney_fails(tmp_path, monkeypatch):
+    from windows_app import main
+    from astock_quant.data import sina_daily
+    class Session:
+        trust_env = True
+        def get(self,*args,**kwargs):
+            raise OSError('东方财富断开')
+    monkeypatch.setattr(main.requests,'Session',Session)
+    monkeypatch.setattr(main,'CACHE_DIR',tmp_path)
+    monkeypatch.setattr(main.time,'sleep',lambda _:None)
+    monkeypatch.setattr(sina_daily,'fetch_sina_daily', lambda symbol,session,start_year: bars().reset_index(names='date'))
+    frame = main.fetch_history('920002', start_year=2026, force_refresh=True, persist=False, min_rows=2)
+    assert len(frame) == 200 and frame.attrs['data_source'] == '新浪前复权'
+
+
+def test_stale_provider_result_is_not_accepted_as_latest_market_date(tmp_path, monkeypatch):
+    from windows_app import main
+    from astock_quant.data import sina_daily
+    class Response:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'data': {'sh600000':{'qfqday':[['2026-09-23','10','10','11','9','100'],
+                                                      ['2026-09-24','10','10','11','9','100']]}}}
+    class Session:
+        trust_env = False
+        def get(self,*args,**kwargs): return Response()
+    monkeypatch.setattr(main.requests,'Session',Session)
+    monkeypatch.setattr(main,'CACHE_DIR',tmp_path)
+    monkeypatch.setattr(main.time,'sleep',lambda _:None)
+    monkeypatch.setattr(sina_daily,'fetch_sina_daily',lambda symbol,session,start_year: bars().reset_index(names='date'))
+    frame = main.fetch_history('600000',start_year=2026,force_refresh=True,persist=False,
+                               min_rows=2,minimum_as_of=TARGET)
+    assert frame.index[-1].date() == TARGET and frame.attrs['data_source'] == '新浪前复权'
+
+
+def test_explicit_historical_cutoff_can_scan_during_a_holiday(monkeypatch):
+    from windows_app import main
+    from astock_quant.desktop import weekly_trend_scanner
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: date(2026,10,1))
+    def history(*args, **kwargs):
+        assert kwargs['minimum_as_of'] == date(2026,9,25)
+        return bars()
+    monkeypatch.setattr(main, 'fetch_history', history)
+    class Scanner:
+        def scan(self, *, target, progress, should_pause): return target
+    results, errors = [], []
+    worker = main.FullMarketWorker(Scanner(), requested_target=date(2026,9,25))
+    worker.completed.connect(results.append)
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert results == [date(2026,9,25)] and not errors
+
+
+def test_index_date_can_use_independent_sina_when_tencent_and_eastmoney_are_stale(tmp_path, monkeypatch):
+    from windows_app import main
+    from astock_quant.data import sina_daily
+    class Response:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'data': {'sh000300':{'qfqday':[['2026-09-23','10','10','11','9','100'],
+                                                       ['2026-09-24','10','10','11','9','100']]}}}
+    class Session:
+        trust_env = False
+        def get(self,*args,**kwargs): return Response()
+    monkeypatch.setattr(main.requests,'Session',Session)
+    monkeypatch.setattr(main,'CACHE_DIR',tmp_path)
+    monkeypatch.setattr(main.time,'sleep',lambda _:None)
+    monkeypatch.setattr(sina_daily,'fetch_sina_index',lambda symbol,session,start_year: bars().reset_index(names='date'), raising=False)
+    frame = main.fetch_history('INDEX_000300',market_symbol='sh000300',start_year=2026,
+        force_refresh=True,persist=False,min_rows=2,minimum_as_of=TARGET)
+    assert frame.index[-1].date() == TARGET and frame.attrs['data_source'] == '新浪指数'
