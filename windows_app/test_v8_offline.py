@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -58,7 +59,7 @@ class V8OfflineTests(unittest.TestCase):
             def get(self, *args, **kwargs): return Response()
 
         with tempfile.TemporaryDirectory() as temp:
-            with patch.object(main.requests, 'Session', Session), patch.object(main, 'CACHE_DIR', Path(temp)):
+            with patch.object(main.requests, 'Session', Session), patch.object(main, 'CACHE_DIR', Path(temp)), patch.dict('sys.modules', {'akshare': SimpleNamespace(), 'baostock': SimpleNamespace(login=lambda: SimpleNamespace(error_code='1', error_msg='离线测试'), logout=lambda: None)}):
                 index = main.fetch_history('INDEX_000300', start_year=2026,
                     market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
                 self.assertEqual(len(index), 38)
@@ -137,7 +138,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.3.2')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.3')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
