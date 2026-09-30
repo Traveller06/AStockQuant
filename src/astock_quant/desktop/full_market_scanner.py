@@ -41,6 +41,8 @@ class FullMarketResult:
     selected: int
     paused: bool
     rows: tuple[ScreenRow, ...]
+    universe_verified: bool = True
+    universe_as_of: str = ""
 
 
 class FullMarketScanner:
@@ -63,19 +65,52 @@ class FullMarketScanner:
             if manifest.get('target') != target.isoformat():
                 raise ValueError('扫描快照日期不一致')
             return manifest
-        stocks, source = self.universe_loader()
+        verified, universe_as_of = True, target.isoformat()
+        try:
+            stocks, source = self.universe_loader()
+            self._validate_pool(stocks, source)
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+            fallback = self._recent_verified_manifest(target)
+            if fallback is None:
+                raise ValueError(f'全A股列表不完整：{exc}；没有七天内可用的完整名册，未开始检测') from exc
+            stocks = fallback['stocks']
+            verified, universe_as_of = False, fallback['target']
+            source = f"名册待更新：使用{universe_as_of}已核实完整列表；在线补齐失败：{exc}"
         stocks = sorted(stocks, key=lambda item: str(item['code']))
-        codes = [str(item['code']) for item in stocks]
-        exchanges = {str(item.get('exchange', '')) for item in stocks}
-        if len(stocks) < self.minimum_pool or len(set(codes)) != len(codes) or not {'沪', '深', '北'} <= exchanges:
-            raise ValueError(f'全A股列表不完整（{len(stocks)}只、覆盖{sorted(exchanges)}）；未开始检测，稍后重试列表接口')
-        if '过期' in source or '新浪沪深' in source:
-            raise ValueError(f'全A股列表不完整：{source}；未开始检测')
         manifest = {'target': target.isoformat(), 'source': source, 'stocks': stocks,
                     'created_at': datetime.now().isoformat(timespec='seconds'),
-                    'rule': '9月8日规则1', 'adjustment_basis': 'qfq'}
+                    'rule': '9月8日规则1', 'adjustment_basis': 'qfq',
+                    'universe_verified': verified, 'universe_as_of': universe_as_of}
         _atomic_json(manifest_path, manifest)
         return manifest
+
+    def _validate_pool(self, stocks, source):
+        codes = [str(item['code']) for item in stocks]
+        exchanges = {str(item.get('exchange', '')) for item in stocks}
+        valid = (len(stocks) >= self.minimum_pool and len(set(codes)) == len(codes)
+                 and {'沪','深','北'} <= exchanges
+                 and all(len(code)==6 and code.isdigit() for code in codes)
+                 and all(item.get('name') for item in stocks))
+        if self.minimum_pool >= 5000:
+            valid = valid and all(sum(item.get('exchange')==market for item in stocks)>=minimum
+                                 for market,minimum in (('沪',1000),('深',1000),('北',100)))
+        if not valid or source.startswith('过期'):
+            raise ValueError(f'全A股列表不完整（{len(stocks)}只、覆盖{sorted(exchanges)}）；来源 {source}')
+
+    def _recent_verified_manifest(self, target):
+        for path in sorted(self.root.glob('*/manifest.json'), reverse=True):
+            try:
+                manifest = json.loads(path.read_text(encoding='utf-8'))
+                old_date = date.fromisoformat(manifest['target'])
+                if not 0 <= (target-old_date).days <= 7 or not manifest.get('universe_verified',True):
+                    continue
+                if '名册待更新' in manifest['source']:
+                    continue
+                self._validate_pool(manifest['stocks'], manifest['source'])
+                return manifest
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return None
 
     def _history(self, code: str, target: date) -> pd.DataFrame:
         base_path = self.app_dir / 'cache' / f'{code}.csv'
@@ -133,7 +168,8 @@ class FullMarketScanner:
             sum(row.status == 'excluded' for row in rows),
             sum(row.status in ('error', 'stale') for row in rows),
             sum(row.status in ('strong', 'confirm', 'preconfirm') for row in rows),
-            paused, tuple(rows))
+            paused, tuple(rows), manifest.get('universe_verified',True),
+            manifest.get('universe_as_of',target.isoformat()))
 
     def scan(self, *, target: date, progress: Callable[[int, str], None] | None = None,
              should_pause: Callable[[], bool] | None = None) -> FullMarketResult:
