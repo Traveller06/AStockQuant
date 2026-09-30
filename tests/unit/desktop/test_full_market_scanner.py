@@ -222,3 +222,36 @@ def test_index_date_can_use_independent_sina_when_tencent_and_eastmoney_are_stal
     frame = main.fetch_history('INDEX_000300',market_symbol='sh000300',start_year=2026,
         force_refresh=True,persist=False,min_rows=2,minimum_as_of=TARGET)
     assert frame.index[-1].date() == TARGET and frame.attrs['data_source'] == '新浪指数'
+
+
+def test_sina_and_independent_bse_can_form_a_complete_market_list(tmp_path,monkeypatch):
+    from windows_app import main
+    from astock_quant.data import market_universe
+    monkeypatch.setitem(sys.modules,'akshare',SimpleNamespace(stock_info_a_code_name=lambda: (_ for _ in ()).throw(OSError('主接口断开'))))
+    monkeypatch.setattr(main,'fetch_sina_universe',lambda:[{'code':'600000','name':'沪市'},{'code':'000001','name':'深市'}])
+    monkeypatch.setattr(market_universe,'fetch_bse_universe',lambda:[{'code':'920002','name':'北市'}])
+    stocks,source=main.fetch_market_universe(force=True,include_st=True,persist=False)
+    scanner=FullMarketScanner(tmp_path,universe_loader=lambda:(stocks,source),history_fetcher=lambda code:bars(),minimum_pool=3)
+    result=scanner.scan(target=TARGET)
+    assert result.total==3 and result.failed==0
+    assert {r.symbol for r in result.rows} == {'600000','000001','920002'}
+
+
+def test_recent_verified_full_manifest_survives_incomplete_live_list(tmp_path):
+    previous=FullMarketScanner(tmp_path,universe_loader=universe,history_fetcher=lambda code:bars(),minimum_pool=3)
+    previous.scan(target=date(2026,9,24))
+    def incomplete(): return ([{'code':'600000','name':'沪市'},{'code':'000001','name':'深市'}], '新浪沪深')
+    current=FullMarketScanner(tmp_path,universe_loader=incomplete,history_fetcher=lambda code:bars(),minimum_pool=3)
+    result=current.scan(target=TARGET)
+    assert result.total==4 and result.completed==4
+    assert '名册待更新' in result.source and '2026-09-24' in result.source
+    assert result.universe_verified is False and result.universe_as_of == '2026-09-24'
+    assert next(r for r in result.rows if r.symbol=='430001').latest_date=='2026-09-25'
+
+
+def test_old_full_manifest_cannot_be_used_as_current_market_pool(tmp_path):
+    old=FullMarketScanner(tmp_path,universe_loader=universe,history_fetcher=lambda code:bars(),minimum_pool=3)
+    old.scan(target=date(2026,9,10))
+    current=FullMarketScanner(tmp_path,universe_loader=lambda:([], '新浪沪深'),history_fetcher=lambda code:pytest.fail('不应下载'),minimum_pool=3)
+    with pytest.raises(ValueError,match='不完整'):
+        current.scan(target=TARGET)
