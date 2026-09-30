@@ -50,6 +50,7 @@ class FullMarketScanner:
         self.universe_loader = universe_loader
         self.history_fetcher = history_fetcher
         self.minimum_pool = minimum_pool
+        self.active_target: date | None = None
         self.root = self.app_dir / 'v8_runs' / 'screens' / 'full_market'
 
     def _run_dir(self, target: date) -> Path:
@@ -126,7 +127,7 @@ class FullMarketScanner:
         stocks = manifest['stocks']
         rows = self._rows(target, stocks)
         order = {'strong': 0, 'confirm': 1, 'preconfirm': 2, 'rejected': 3,
-                 'excluded': 4, 'stale': 5, 'error': 6}
+                 'insufficient': 4, 'excluded': 5, 'stale': 6, 'error': 7}
         rows.sort(key=lambda row: (order.get(row.status, 7), row.symbol))
         return FullMarketResult(target, manifest['source'], len(stocks), len(rows),
             sum(row.status == 'excluded' for row in rows),
@@ -136,6 +137,7 @@ class FullMarketScanner:
 
     def scan(self, *, target: date, progress: Callable[[int, str], None] | None = None,
              should_pause: Callable[[], bool] | None = None) -> FullMarketResult:
+        self.active_target = target
         manifest = self._manifest(target)
         stocks = manifest['stocks']
         folder = self._run_dir(target) / 'rows'
@@ -156,8 +158,17 @@ class FullMarketScanner:
                 try:
                     frame = self._history(code, target)
                     days = {stamp.date() for stamp in frame.index if stamp.date() <= target}
-                    row = _three_tier_row(code, frame, target,
-                        _closed_week_calendar(days, target), 'qfq', name)
+                    visible = frame[frame.index.date <= target]
+                    weeks = visible.resample('W-FRI').last().dropna()
+                    if target.weekday() < 4 and len(weeks):
+                        weeks = weeks.iloc[:-1]
+                    if len(weeks) < 21:
+                        row = ScreenRow(code, name, 'insufficient', visible.index[-1].date().isoformat(),
+                            float(visible.close.iloc[-1]), '',
+                            f'已取得{len(visible)}行日线、{len(weeks)}个完整周；规则1需至少21个完整周', ())
+                    else:
+                        row = _three_tier_row(code, frame, target,
+                            _closed_week_calendar(days, target), 'qfq', name)
                 except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, RuntimeError) as exc:
                     row = ScreenRow(code, name, 'error', '', None, '', f'行情或筛选失败：{exc}', ())
             _atomic_json(path, asdict(row))
