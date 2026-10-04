@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +16,15 @@ from astock_quant.desktop.full_market_scanner import FullMarketScanner
 
 
 class V8OfflineTests(unittest.TestCase):
+    def test_national_holiday_uses_last_closed_exchange_day(self):
+        from astock_quant.data.calendar import SHANGHAI
+        from astock_quant.desktop.weekly_trend_scanner import _safe_date
+        self.assertEqual(_safe_date(datetime(2026,10,4,20,14,tzinfo=SHANGHAI)), date(2026,9,30))
+
+    def test_sina_encoded_assignment_ignores_following_script(self):
+        from astock_quant.data.sina_daily import _encoded_assignment
+        self.assertEqual(_encoded_assignment('var bars="abc"; var extra="def";'), 'abc')
+
     def test_short_stock_history_is_recorded_without_ending_market_scan(self):
         days = pd.bdate_range(end='2026-09-25', periods=180)
         frame = pd.DataFrame({'open': [10.]*180, 'high': [11.]*180,
@@ -138,7 +147,7 @@ class V8OfflineTests(unittest.TestCase):
         frame = pd.DataFrame({'open':[10.]*90, 'high':[11.]*90, 'low':[9.]*90,
                               'close':[10.]*90, 'volume':[1000.]*90}, index=dates)
         with tempfile.TemporaryDirectory() as temporary:
-            facade = WeeklyTrendFacade(Path(temporary), '8.3.4')
+            facade = WeeklyTrendFacade(Path(temporary), '8.3.5')
             result = facade.run({'600000': frame}, DesktopBacktestOptions.defaults())
             self.assertTrue((result.run_dir / '_COMPLETE').exists())
             self.assertEqual(facade.open_last_result().run_id, result.run_id)
