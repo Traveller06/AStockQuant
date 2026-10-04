@@ -117,10 +117,10 @@ def test_refresh_pause_and_resume_skips_successful_symbols(tmp_path):
     assert calls==['600000','600001']
 
 
-def test_monday_before_close_uses_previous_friday():
+def test_monday_before_close_skips_mid_autumn_holiday():
     from astock_quant.desktop.weekly_trend_scanner import _safe_date
     now=datetime(2026,9,28,10,tzinfo=ZoneInfo('Asia/Shanghai'))
-    assert _safe_date(now)==date(2026,9,25)
+    assert _safe_date(now)==date(2026,9,24)
 
 
 def test_index_date_check_accepts_38_valid_rows_without_weakening_stock_history(tmp_path, monkeypatch):
@@ -275,3 +275,42 @@ def test_weekly_refresh_uses_short_recent_index_only_for_cutoff(tmp_path, monkey
     worker.run()
     assert not errors
     assert outputs and outputs[0][0] == date(2026,9,25)
+
+
+def test_safe_date_skips_official_2026_holidays():
+    from astock_quant.desktop.weekly_trend_scanner import _safe_date
+    cases = [
+        (datetime(2026,10,4,20,14,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,9,30)),
+        (datetime(2026,10,8,15,29,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,9,30)),
+        (datetime(2026,10,8,15,30,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,10,8)),
+        (datetime(2026,10,10,18,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,10,9)),
+        (datetime(2026,2,24,10,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,2,13)),
+        (datetime(2026,1,4,18,tzinfo=ZoneInfo('Asia/Shanghai')), date(2025,12,31)),
+        (datetime(2026,4,7,10,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,4,3)),
+        (datetime(2026,5,6,10,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,4,30)),
+        (datetime(2026,6,22,10,tzinfo=ZoneInfo('Asia/Shanghai')), date(2026,6,18)),
+        (datetime(2026,10,8,7,30,tzinfo=ZoneInfo('UTC')), date(2026,10,8)),
+    ]
+    for now, expected in cases:
+        assert _safe_date(now) == expected, now
+
+
+def test_full_market_worker_on_national_holiday_requests_september_close(monkeypatch):
+    from windows_app import main
+    from astock_quant.desktop import weekly_trend_scanner
+    target = weekly_trend_scanner._safe_date(datetime(2026,10,4,20,14,tzinfo=ZoneInfo('Asia/Shanghai')))
+    monkeypatch.setattr(weekly_trend_scanner, '_safe_date', lambda: target)
+    def fetch(*args, **kwargs):
+        assert kwargs['minimum_as_of'] == date(2026,9,30)
+        return sample(start='2026-09-29', periods=2)
+    class Scanner:
+        def scan(self, *, target, **kwargs):
+            assert target == date(2026,9,30)
+            return 'scan-success'
+    monkeypatch.setattr(main, 'fetch_history', fetch)
+    worker = main.FullMarketWorker(Scanner())
+    results, errors = [], []
+    worker.completed.connect(results.append)
+    worker.failed.connect(errors.append)
+    worker.run()
+    assert results == ['scan-success'] and not errors
