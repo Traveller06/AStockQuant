@@ -8,6 +8,24 @@ from __future__ import annotations
 import pandas as pd
 
 
+def _encoded_assignment(response: str) -> str:
+    """Read only the first assigned JSON string; provider script is never run."""
+    import json
+    import re
+    match = re.match(r"\s*(?:(?:var|let|const)\s+)?[A-Za-z_$][\w$]*\s*=\s*", response)
+    if match is None:
+        raise ValueError('新浪历史行情缺少数据赋值')
+    payload = response[match.end():]
+    try:
+        encoded, end = json.JSONDecoder().raw_decode(payload)
+    except (ValueError, TypeError) as exc:
+        raise ValueError('新浪历史行情编码无效') from exc
+    trailing = payload[end:].lstrip()
+    if not isinstance(encoded, str) or not encoded or (trailing and not trailing.startswith(';')):
+        raise ValueError('新浪历史行情编码无效')
+    return encoded
+
+
 def normalize_sina_daily(rows, factors, start_year: int) -> pd.DataFrame:
     columns = ['date', 'open', 'close', 'high', 'low', 'volume']
     bars = pd.DataFrame(rows)
@@ -50,8 +68,7 @@ def fetch_sina_daily(symbol: str, session, start_year: int) -> pd.DataFrame:
     headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/'}
     history = session.get(zh_sina_a_stock_hist_url.format(symbol), timeout=18, headers=headers)
     history.raise_for_status()
-    import json
-    encoded = json.loads(history.text.partition('=')[2].strip().rstrip(';'))
+    encoded = _encoded_assignment(history.text)
     engine = py_mini_racer.MiniRacer()
     try:
         engine.eval(hk_js_decode)
@@ -67,7 +84,6 @@ def fetch_sina_daily(symbol: str, session, start_year: int) -> pd.DataFrame:
 
 def fetch_sina_index(symbol: str, session, start_year: int) -> pd.DataFrame:
     """Independent index history used only to verify the closing session."""
-    import json
     import py_mini_racer
     from akshare.index.cons import zh_sina_index_stock_hist_url
     from akshare.stock.cons import hk_js_decode
@@ -76,7 +92,7 @@ def fetch_sina_index(symbol: str, session, start_year: int) -> pd.DataFrame:
     response = session.get(zh_sina_index_stock_hist_url.format(symbol),
         params={'d':'2020_2_4'}, timeout=18, headers={'User-Agent':'Mozilla/5.0'})
     response.raise_for_status()
-    encoded = json.loads(response.text.partition('=')[2].strip().rstrip(';'))
+    encoded = _encoded_assignment(response.text)
     engine = py_mini_racer.MiniRacer()
     try:
         engine.eval(hk_js_decode)
