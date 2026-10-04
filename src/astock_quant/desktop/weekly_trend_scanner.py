@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from astock_quant.data.calendar import SHANGHAI, TradingCalendar
+from astock_quant.data.calendar import SHANGHAI, TradingCalendar, previous_open_day
 from astock_quant.core.errors import AStockQuantError
 from astock_quant.strategies.weekly_trend.models import PatternState, PatternStatus
 from astock_quant.strategies.weekly_trend.strategy import WeeklyTrendConfirmationStrategy
@@ -52,9 +52,7 @@ class ScreenResult:
 def _safe_date(now: datetime | None = None) -> date:
     local = now.astimezone(SHANGHAI) if now else datetime.now(SHANGHAI)
     cutoff = local.date() if local.time() >= time(15, 30) else local.date() - timedelta(days=1)
-    while cutoff.weekday() >= 5:
-        cutoff -= timedelta(days=1)
-    return cutoff
+    return previous_open_day(cutoff)
 
 
 def _closed_week_calendar(sessions: set[date], target: date) -> TradingCalendar:
