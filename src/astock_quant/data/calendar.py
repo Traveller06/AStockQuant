@@ -3,12 +3,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from itertools import groupby
 from zoneinfo import ZoneInfo
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+# SSE official 2026 closure notice, also shared by SZSE/BSE:
+# https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+# Other years retain the historical weekday fallback until their notices are added.
+HOLIDAY_RANGES_2026 = (
+    (date(2026, 1, 1), date(2026, 1, 3)),
+    (date(2026, 2, 15), date(2026, 2, 23)),
+    (date(2026, 4, 4), date(2026, 4, 6)),
+    (date(2026, 5, 1), date(2026, 5, 5)),
+    (date(2026, 6, 19), date(2026, 6, 21)),
+    (date(2026, 9, 25), date(2026, 9, 27)),
+    (date(2026, 10, 1), date(2026, 10, 7)),
+)
+
+
+def previous_open_day(cutoff: date) -> date:
+    """Return the open weekday on/before cutoff using the published 2026 schedule.
+
+    This is the live-screen default only; explicit historical session calendars
+    remain the source of truth for backtests. Make-up weekend workdays stay closed.
+    """
+    while cutoff.weekday() >= 5 or any(start <= cutoff <= end for start, end in HOLIDAY_RANGES_2026):
+        cutoff -= timedelta(days=1)
+    return cutoff
 
 
 @dataclass(frozen=True)
