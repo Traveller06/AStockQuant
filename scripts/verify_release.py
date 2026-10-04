@@ -30,7 +30,7 @@ def verify_release(archive: Path) -> str:
                         FORBIDDEN.intersection(parts) or name.endswith('/')):
                     raise ValueError(f'压缩包存在不安全路径：{name}')
             source.extractall(root)
-        if 'APP_VERSION = "8.3.4"' not in (root / 'main.py').read_text(encoding='utf8'):
+        if 'APP_VERSION = "8.3.5"' not in (root / 'main.py').read_text(encoding='utf8'):
             raise ValueError('版本标识错误')
         subprocess.run([sys.executable, '-m', 'compileall', '-q', str(root)], check=True)
         subprocess.run([sys.executable, '-m', 'unittest', 'test_execution',
