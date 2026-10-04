@@ -38,7 +38,7 @@ def test_transport_parses_factor_assignment_and_disables_proxy(monkeypatch):
             assert not self.trust_env and timeout <= 18
             if url.endswith('qfq.js'):
                 return Response('var factor = {"data":[["2026-09-29","1"]]};\n')
-            return Response('var bars = "encoded_daily_fixture";\n')
+            return Response('var bars = "encoded_daily_fixture"; var other = "trailer";\n')
     monkeypatch.setattr(py_mini_racer,'MiniRacer',Decoder)
     frame = fetch_sina_daily('bj920002', Session(), 2026)
     assert frame.close.tolist() == [10.]
@@ -53,7 +53,7 @@ def test_index_fallback_decodes_actual_bar_dates_without_stock_adjustment(monkey
         def call(self, function, encoded):
             return [{'date':'2026-09-30','open':'4000','high':'4010','low':'3990','close':'4005','volume':'1000'}]
     class Response:
-        text = 'var index = "encoded_index_fixture";'
+        text = 'var index = "encoded_index_fixture"; var other = "trailer";'
         def raise_for_status(self): pass
     class Session:
         trust_env = True
@@ -64,3 +64,17 @@ def test_index_fallback_decodes_actual_bar_dates_without_stock_adjustment(monkey
     frame = fetch_sina_index('sh000300',Session(),2026)
     assert frame.close.tolist() == [4005]
     assert frame.date.dt.strftime('%Y-%m-%d').tolist() == ['2026-09-30']
+
+
+@pytest.mark.parametrize('response', ['<html>error</html>', 'var bars = 42;', 'var bars = "abc" + dangerous();', 'var bars = "";'])
+def test_encoded_assignment_rejects_invalid_payload(response):
+    from astock_quant.data.sina_daily import _encoded_assignment
+    with pytest.raises(ValueError):
+        _encoded_assignment(response)
+
+
+def test_encoded_assignment_preserves_escaped_content_and_ignores_trailing_code():
+    from astock_quant.data.sina_daily import _encoded_assignment
+    import json
+    encoded = 'abc;"quote"=end'
+    assert _encoded_assignment('var bars = ' + json.dumps(encoded) + '; throw new Error("never execute");') == encoded
