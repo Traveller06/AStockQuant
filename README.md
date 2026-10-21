@@ -65,3 +65,10 @@ Copyright (c) 2026 Traveller06。
 本项目原创代码采用 **GNU General Public License v3.0 only（SPDX：GPL-3.0-only）**，完整条款见 [LICENSE](LICENSE)。
 
 第三方依赖和引用代码仍适用各自的许可证与版权声明；本项目的许可声明不改变这些条件。
+
+## 安装包与完整源码
+
+- [Windows Python 预发布安装包（v8.3.5-preview.1）](https://github.com/Traveller06/AStockQuant/releases/tag/v8.3.5-preview.1)：在 Assets 下载 Windows-Python.zip，需64位 Python，推荐3.11，首次安装依赖需要联网。
+- [相应版本完整源码](https://github.com/Traveller06/AStockQuant/tree/v8.3.5-preview.1)：GitHub Release 同名 tag 也提供 Source code ZIP/tar.gz。
+- [安装、测试与构建说明](BUILDING.md)：含源码启动、ZIP构建、校验及保留个人缓存的升级步骤。
+- [发布进度与恢复记录](docs/PUBLISH_RECOVERY.md)。安装包是预发布验证版；Windows自动化结果见Release的VALIDATION.json，不宣称用户网络下全市场数据已可用。

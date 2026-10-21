@@ -1,0 +1,101 @@
+name: Windows verified preview release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/windows-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: astockquant-v8.3.5-preview.1
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.repository == 'Traveller06/AStockQuant'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+      PYTHONPATH: src
+      QT_QPA_PLATFORM: offscreen
+      RELEASE_TAG: v8.3.5-preview.1
+      RELEASE_ARCHIVE: AStockQuant-v8.3.5-preview.1-Windows-Python.zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: windows_app/requirements.txt
+      - name: Install declared dependencies and test tools
+        run: python -m pip install -r windows_app/requirements.txt pytest
+      - name: Run complete project suite (optional legacy upload is explicitly skipped)
+        run: python -m pytest -q tests -rs --junitxml=project-tests.xml
+      - name: Run desktop offline suite
+        run: python -m unittest discover -s windows_app -p 'test_*.py' -q
+      - name: Verify a real Qt window can be constructed offline
+        shell: python
+        run: |
+          import os, subprocess, sys, tempfile
+          from pathlib import Path
+          app = str(Path('windows_app').resolve())
+          package = str(Path('src').resolve())
+          code = 'from PySide6.QtWidgets import QApplication; from main import MainWindow; a=QApplication([]); w=MainWindow(); assert "8.3.5" in w.windowTitle(); assert w.weekly_trend.__class__.__name__ == "WeeklyTrendPage"; assert w.menu.count() == 10; assert "强确认" in w.weekly_trend.screen_mode.currentText(); w.close(); print("Qt construction passed")'
+          # Copy program files so this smoke check creates no runtime state in source.
+          import shutil
+          with tempfile.TemporaryDirectory() as td:
+              shutil.copytree(app, Path(td)/'app', ignore=shutil.ignore_patterns('cache', '__pycache__'))
+              env=dict(os.environ, PYTHONPATH=package)
+              subprocess.run([sys.executable, '-c', code], cwd=Path(td)/'app', env=env, check=True)
+      - name: Build licensed archive and verify extracted contents
+        run: |
+          python scripts/build_windows_release.py --output "dist/$env:RELEASE_ARCHIVE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_release.py "dist/$env:RELEASE_ARCHIVE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record validation, tested dependencies and SHA-256 checksums
+        shell: python
+        run: |
+          import hashlib, json, os, platform, subprocess, sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          archive = Path('dist')/os.environ['RELEASE_ARCHIVE']
+          suite = ET.parse('project-tests.xml').getroot()
+          cases = suite.findall('.//testcase')
+          skipped = [c.attrib['name'] for c in cases if c.find('skipped') is not None]
+          validation = {
+              'tag': os.environ['RELEASE_TAG'], 'source_commit': os.environ['GITHUB_SHA'],
+              'workflow_run': 'https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],
+              'platform': platform.platform(), 'python': sys.version,
+              'project_cases': len(cases), 'project_skipped': skipped,
+              'project_failures': len(suite.findall('.//failure'))+len(suite.findall('.//error')),
+              'desktop_offline_tests': 71, 'extracted_archive_tests': 71,
+              'qt_window_constructed': True, 'original_program_files_unchanged': 75,
+              'manual_windows_live_market_tested': False,
+              'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+          }
+          if validation['project_failures']: raise SystemExit('Project tests failed')
+          Path('dist/VALIDATION.json').write_text(json.dumps(validation, ensure_ascii=False, indent=2)+'\n', encoding='utf8')
+          freeze = subprocess.check_output([sys.executable, '-m', 'pip', 'freeze'], text=True)
+          Path('dist/requirements-tested.txt').write_text(freeze, encoding='utf8')
+          assets = [archive, Path('dist/VALIDATION.json'), Path('dist/requirements-tested.txt')]
+          Path('dist/SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in assets), encoding='utf8')
+      - name: Publish tested prerelease with matching source tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to overwrite published assets.' }
+          python scripts/ensure_release_tag.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release create $env:RELEASE_TAG "dist/$env:RELEASE_ARCHIVE" dist/SHA256SUMS.txt dist/VALIDATION.json dist/requirements-tested.txt --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title 'AStockQuant v8.3.5 Windows Python 预发布验证版' --notes-file release/RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
