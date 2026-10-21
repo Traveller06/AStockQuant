@@ -20,3 +20,10 @@ Next: portable offline tests, GPL distribution metadata, test/build verification
 ## Pre-publication review
 
 Independent read-only review confirmed all75 program file hashes unchanged. One important issue found: gh release create --target does not retarget an existing tag. Added ensure_release_tag.py to reject mismatched existing tags, create missing tags at the tested full SHA and resolve them again; publication uses --verify-tag. Four focused tests first failed then passed. No program files changed.
+
+## Stage 3 — main source published, Windows gate running
+
+- Source integrated into main with both branch histories retained:30fb9d464eb191ad4309d95a72e935f180e19b60.164 files/106Python files; src/windows_app/LICENSE unchanged; README additions only.
+- GitHub source checkpoints: b901fea (inventory),1a46dc2 (packaging),1c70cb2 (tag integrity). Latest local suite232passed; original program75hashes unchanged.
+- Windows job https://github.com/Traveller06/AStockQuant/actions/runs/39543141748 is running. No Release yet at this checkpoint.
+- First unfinished step: inspect this run's jobs/logs; fix only proven release/test infrastructure failures, never rewrite strategies. Publish is gated and prerelease only. When successful verify tag==testedSHA, release assets and hashes, then append final evidence.
