@@ -31,3 +31,9 @@ Independent read-only review confirmed all75 program file hashes unchanged. One 
 ## Windows gate attempt 1 — blocked correctly; newline fix
 
 Run39543141748: 230 project tests passed,1optional legacy skip,1payload hash test failed. Runner Git auto-converted LF batch files to CRLF; reproduced original SHA ce50cebe8b9f0fbd578ea94a76f72475518c7ef1591e993c3d818ca961f00ca4 versus CRLF8e9a6139a18e69683fe7ad42f0751d465c808143587c80b1349928cbf231b2b8. No application test failure or release published. Add .gitattributes enforcing LF for text/batch files and rerun through push-triggered workflow; source program blobs untouched.
+
+## Windows gate attempt 2 — software checks green, publication API corrected
+
+Run39543410757 at source503a1a6182020419e97bb53ce9ccdf84c547fc94: project231passed/1optional skip, desktop71passed, realQt main/three-tier page loaded, extractedZIP71passed. Windows archive79files SHA256040cab2b15b8ee3d5d453783f64c9b447f21748cab6aa865c69c006e09a92a19. Cross-platform compressed ZIP byte hashes may differ with zlib versions; per-file original75 hashes matched.
+
+Publication stopped before tag/release creation because commits/missing-tag returnsHTTP422 instead of404. New regression reproduced it; helper now reads git/ref/tags first (404 for missing), then creates missing tag and resolves its commit. Still reject mismatched commits/permission errors; no overwrites. Next run pending. Ignore rules also cover nested source-run caches/accounts and private key/environment files.

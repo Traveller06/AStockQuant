@@ -14,7 +14,7 @@ def ensure_release_tag(repository: str, tag: str, commit: str, *, run=subprocess
     def invoke(*args):
         return run(['gh', 'api', *args], capture_output=True, text=True, check=False)
 
-    result = invoke(endpoint)
+    result = invoke(f'repos/{repository}/git/ref/tags/{tag}')
     if result.returncode:
         if '(HTTP 404)' not in result.stderr:
             raise RuntimeError('Cannot verify release tag: ' + result.stderr)
@@ -22,9 +22,9 @@ def ensure_release_tag(repository: str, tag: str, commit: str, *, run=subprocess
                          '-f', f'ref=refs/tags/{tag}', '-f', f'sha={commit}')
         if created.returncode:
             raise RuntimeError('Cannot create release tag: ' + created.stderr)
-        result = invoke(endpoint)
-        if result.returncode:
-            raise RuntimeError('Cannot resolve created release tag: ' + result.stderr)
+    result = invoke(endpoint)
+    if result.returncode:
+        raise RuntimeError('Cannot resolve release tag: ' + result.stderr)
     if json.loads(result.stdout).get('sha') != commit:
         raise RuntimeError('Release tag points to a different commit; refusing publication')
 

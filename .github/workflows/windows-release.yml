@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/windows-release.yml
       - .gitattributes
+      - scripts/ensure_release_tag.py
   workflow_dispatch:
 
 permissions:

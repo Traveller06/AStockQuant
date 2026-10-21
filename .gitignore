@@ -27,3 +27,23 @@ v8_runs/
 /tail_strategy_state.json
 /research_sample.json
 /validation_snapshot_v1.json.gz
+
+# Personal runtime state may also be created under windows_app/ in a source checkout.
+cache/
+tail_strategy_cache/
+v8_state/
+paper_account.json
+tail_strategy_state.json
+research_sample.json
+validation_snapshot_v1.json.gz
+watchlist.json
+a_share_universe.json
+stock_universe.json
+market_scan_checkpoint.json
+research_data_checkpoint.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
