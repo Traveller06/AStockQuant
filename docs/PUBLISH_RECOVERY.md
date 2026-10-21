@@ -37,3 +37,12 @@ Run39543141748: 230 project tests passed,1optional legacy skip,1payload hash tes
 Run39543410757 at source503a1a6182020419e97bb53ce9ccdf84c547fc94: project231passed/1optional skip, desktop71passed, realQt main/three-tier page loaded, extractedZIP71passed. Windows archive79files SHA256040cab2b15b8ee3d5d453783f64c9b447f21748cab6aa865c69c006e09a92a19. Cross-platform compressed ZIP byte hashes may differ with zlib versions; per-file original75 hashes matched.
 
 Publication stopped before tag/release creation because commits/missing-tag returnsHTTP422 instead of404. New regression reproduced it; helper now reads git/ref/tags first (404 for missing), then creates missing tag and resolves its commit. Still reject mismatched commits/permission errors; no overwrites. Next run pending. Ignore rules also cover nested source-run caches/accounts and private key/environment files.
+
+## Publication complete — 2026-10-21
+
+- Public main contains complete source/dependencies/build/user docs, original README content and LICENSE retained; all strategy/program payload files unchanged.
+- Release: https://github.com/Traveller06/AStockQuant/releases/tag/v8.3.5-preview.1 (prerelease,notdraft).
+- Exact corresponding source tag:3a2e0f940b4c4435ed83a431943f3f18e54b3dda. Preserve this tag; do not move it on later documentation updates.
+- Successful Windows run39543683515:232projectpassed/1optionallegacy skip,desktop71,extracted71,Qtmain/three-tier page constructed. Local explicit legacy suite233passed.
+- Published Windows ZIP040cab2b15b8ee3d5d453783f64c9b447f21748cab6aa865c69c006e09a92a19 (216485bytes,79files). All4publicassets downloaded andverified;75programfilehashes/Licensematch. See docs/PUBLISH_AUDIT.md.
+- No remaining publication step. Next work must follow a new user request or actual Windows/network error; do not repeat/rebuild this release automatically, do not overwrite release assets, reset project, or delete caches.
