@@ -93,7 +93,9 @@ jobs:
         run: |
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to overwrite published assets.' }
-          gh release create $env:RELEASE_TAG "dist/$env:RELEASE_ARCHIVE" dist/SHA256SUMS.txt dist/VALIDATION.json dist/requirements-tested.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --draft --prerelease --title 'AStockQuant v8.3.5 Windows Python 预发布验证版' --notes-file release/RELEASE_NOTES.md
+          python scripts/ensure_release_tag.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release create $env:RELEASE_TAG "dist/$env:RELEASE_ARCHIVE" dist/SHA256SUMS.txt dist/VALIDATION.json dist/requirements-tested.txt --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title 'AStockQuant v8.3.5 Windows Python 预发布验证版' --notes-file release/RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

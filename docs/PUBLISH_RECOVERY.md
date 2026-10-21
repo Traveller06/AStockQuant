@@ -16,3 +16,7 @@ Next: portable offline tests, GPL distribution metadata, test/build verification
 - Licensed ZIP SHA256 610f2ae17d3a5765d020cff608f04dbbbe7b59cc5f0dfc50ff46500bc7192c43. Native Qt window construction passed on Linux offscreen; Windows CI pending.
 - First remote checkpoint b901feaae395b66346aa75c358e1799a0bf9d411, branch codex/v8-phase1. Native git push has no credentials; GitHub Git-data API is the authorized push path.
 - Next: review/commit/sync new packaging and docs, integrate full source tree into main preserving README/LICENSE, execute Windows gated prerelease workflow. Release is not published yet. Do not repeat already completed tests unless code changes or a failed check warrants it.
+
+## Pre-publication review
+
+Independent read-only review confirmed all75 program file hashes unchanged. One important issue found: gh release create --target does not retarget an existing tag. Added ensure_release_tag.py to reject mismatched existing tags, create missing tags at the tested full SHA and resolve them again; publication uses --verify-tag. Four focused tests first failed then passed. No program files changed.
