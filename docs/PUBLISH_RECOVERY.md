@@ -27,3 +27,7 @@ Independent read-only review confirmed all75 program file hashes unchanged. One 
 - GitHub source checkpoints: b901fea (inventory),1a46dc2 (packaging),1c70cb2 (tag integrity). Latest local suite232passed; original program75hashes unchanged.
 - Windows job https://github.com/Traveller06/AStockQuant/actions/runs/39543141748 is running. No Release yet at this checkpoint.
 - First unfinished step: inspect this run's jobs/logs; fix only proven release/test infrastructure failures, never rewrite strategies. Publish is gated and prerelease only. When successful verify tag==testedSHA, release assets and hashes, then append final evidence.
+
+## Windows gate attempt 1 — blocked correctly; newline fix
+
+Run39543141748: 230 project tests passed,1optional legacy skip,1payload hash test failed. Runner Git auto-converted LF batch files to CRLF; reproduced original SHA ce50cebe8b9f0fbd578ea94a76f72475518c7ef1591e993c3d818ca961f00ca4 versus CRLF8e9a6139a18e69683fe7ad42f0751d465c808143587c80b1349928cbf231b2b8. No application test failure or release published. Add .gitattributes enforcing LF for text/batch files and rerun through push-triggered workflow; source program blobs untouched.

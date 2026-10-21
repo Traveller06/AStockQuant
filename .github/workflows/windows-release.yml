@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/windows-release.yml
+      - .gitattributes
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,3 @@
+# Keep tested release payload bytes identical on Linux and Windows.
+* text=auto eol=lf
+*.bat text eol=lf
