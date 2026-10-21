@@ -17,8 +17,8 @@
 ## Tasks and completion gates
 
 - [x] 1. Read-only inventory; clone existing GitHub branch after local cleanup; recover old installer. Check 154 tracked files and 301 historical blobs for private paths and common credential patterns. Existing 75 program files byte-match source; original SHA-256 178076bb54eff3d8a01d882d23a7e413be5a8aec00fc150500aaab1f58f2802c.
-- [ ] 2. Make test inputs portable and network-independent. Preserve old 63-test baseline validation via ASTOCK_V763_ARCHIVE; skip clearly only if optional old upload absent. Supply short data for every external fallback in the 38-row test. Run full tests and old/new ZIP verification.
-- [ ] 3. Extend release contract to require LICENSE, source/build/third-party information. First fail archive contract, then minimal builder/verifier change; preserve all 75 original payload files byte-for-byte. Add BUILDING.md, source mapping, prerelease notes and a recovery report.
+- [x] 2. Make test inputs portable and network-independent. Preserve old 63-test baseline validation via ASTOCK_V763_ARCHIVE; skip clearly only if optional old upload absent. Supply short data for every external fallback in the 38-row test. Run full tests and old/new ZIP verification.
+- [x] 3. Extend release contract to require LICENSE, source/build/third-party information. First fail archive contract, then minimal builder/verifier change; preserve all 75 original payload files byte-for-byte. Add BUILDING.md, source mapping, prerelease notes and a recovery report.
 - [ ] 4. Commit checkpoint and sync source branch. Merge checked tree into main without replacing README/LICENSE. Windows CI installs dependencies, tests, verifies ZIP, records exact dependency versions/checksums, and publishes v8.3.5-preview.1 only after passing.
 - [ ] 5. Verify main source, tag commit, prerelease assets, checksums and download links. Record completed stages and any blocker; never claim manual Windows/network testing.
 

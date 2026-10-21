@@ -1,0 +1,17 @@
+AStockQuant v8.3.5 Windows Python distribution — preview.1
+Copyright (c) 2026 Traveller06. Original project code: GPL-3.0-only.
+Full GNU GPL v3 text: LICENSE. Third-party terms: THIRD_PARTY_NOTICES.md.
+
+Corresponding complete source and build scripts for this distribution:
+https://github.com/Traveller06/AStockQuant/tree/v8.3.5-preview.1
+https://github.com/Traveller06/AStockQuant/archive/refs/tags/v8.3.5-preview.1.zip
+
+Release: https://github.com/Traveller06/AStockQuant/releases/tag/v8.3.5-preview.1
+Build instructions: BUILDING.md; dependencies: source pyproject.toml and windows_app/requirements.txt.
+The release tag identifies the exact corresponding source revision. GitHub's automatic Source code ZIP/tar.gz also provide it.
+
+This package reuses the 75 original v8.3.5 program files without modification.
+Added distribution files: LICENSE, BUILDING.md, THIRD_PARTY_NOTICES.md, SOURCE_INFO.txt.
+Not a standalone EXE or an offline bundled Python runtime. Requires Windows x64,
+Python 3.11 recommended, and internet access for first-time dependency installation.
+Pre-release: automated offline checks do not establish live-market availability or trading profitability.

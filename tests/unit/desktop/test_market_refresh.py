@@ -140,6 +140,16 @@ def test_index_date_check_accepts_38_valid_rows_without_weakening_stock_history(
         def get(self, *args, **kwargs): return Response()
 
     monkeypatch.setattr(main.requests, 'Session', Session)
+    # Every fallback must be controlled: real providers may return enough history.
+    import akshare
+    import baostock
+    from types import SimpleNamespace
+    from astock_quant.data import sina_daily
+    short = pd.DataFrame(rows, columns=['date','open','close','high','low','volume'])
+    monkeypatch.setattr(sina_daily, 'fetch_sina_daily', lambda *args: short.copy())
+    monkeypatch.setattr(akshare, 'stock_zh_a_hist', lambda **kwargs: short.copy())
+    monkeypatch.setattr(baostock, 'login', lambda: SimpleNamespace(error_code='1', error_msg='offline fixture'))
+    monkeypatch.setattr(baostock, 'logout', lambda: None)
     index = main.fetch_history('INDEX_000300', start_year=2026,
         market_symbol='sh000300', force_refresh=True, persist=False, min_rows=2)
     assert len(index) == 38 and index.index[-1].date() == date(2026,9,25)

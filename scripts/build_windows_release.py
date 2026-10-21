@@ -20,6 +20,8 @@ WINDOWS_PROGRAM_FILES = frozenset({
     '只看这里_v8.3.0_两步打开.txt', '只看这里_v8.3.1_两步打开.txt',
     '只看这里_v8.3.2_两步打开.txt', '只看这里_v8.3.3_两步打开.txt', '只看这里_v8.3.4_两步打开.txt', '只看这里_v8.3.5_两步打开.txt',
 })
+DISTRIBUTION_DOCUMENTS = frozenset({'LICENSE', 'BUILDING.md', 'THIRD_PARTY_NOTICES.md', 'SOURCE_INFO.txt'})
+
 FORBIDDEN = frozenset({'cache', 'v8_market_updates', 'tail_strategy_cache', 'tail_strategy_state.json',
                        'v8_state', 'v8_runs', 'research_sample.json',
                        'validation_snapshot_v1.json.gz', 'paper_account.json',
@@ -41,6 +43,11 @@ def build_release(repo_root: Path, destination: Path) -> ReleaseReport:
         path = program / name
         if not path.is_file() or path.is_symlink():
             raise FileNotFoundError(f'发行程序文件缺失：{path}')
+        files[name] = path.read_bytes()
+    for name in sorted(DISTRIBUTION_DOCUMENTS):
+        path = root / name
+        if not path.is_file() or path.is_symlink():
+            raise FileNotFoundError(f'发行许可或源码说明缺失：{path}')
         files[name] = path.read_bytes()
     package = root / 'src' / 'astock_quant'
     for path in sorted(package.rglob('*.py')):

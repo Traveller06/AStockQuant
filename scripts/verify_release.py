@@ -10,7 +10,7 @@ import sys
 import tempfile
 from zipfile import ZipFile
 
-from build_windows_release import FORBIDDEN, WINDOWS_PROGRAM_FILES
+from build_windows_release import DISTRIBUTION_DOCUMENTS, FORBIDDEN, WINDOWS_PROGRAM_FILES
 
 
 def verify_release(archive: Path) -> str:
@@ -22,7 +22,7 @@ def verify_release(archive: Path) -> str:
             if source.testzip() is not None:
                 raise ValueError('压缩包文件损坏')
             names = source.namelist()
-            if len(names) != len(set(names)) or not WINDOWS_PROGRAM_FILES.issubset(set(names)):
+            if len(names) != len(set(names)) or not (WINDOWS_PROGRAM_FILES | DISTRIBUTION_DOCUMENTS).issubset(set(names)):
                 raise ValueError('压缩包程序文件不完整或重复')
             for name in names:
                 parts = Path(name).parts
@@ -32,6 +32,10 @@ def verify_release(archive: Path) -> str:
             source.extractall(root)
         if 'APP_VERSION = "8.3.5"' not in (root / 'main.py').read_text(encoding='utf8'):
             raise ValueError('版本标识错误')
+        if 'GNU GENERAL PUBLIC LICENSE' not in (root / 'LICENSE').read_text(encoding='utf8'):
+            raise ValueError('缺少GPL许可证正文')
+        if 'GPL-3.0-only' not in (root / 'SOURCE_INFO.txt').read_text(encoding='utf8'):
+            raise ValueError('缺少源码许可对应说明')
         subprocess.run([sys.executable, '-m', 'compileall', '-q', str(root)], check=True)
         subprocess.run([sys.executable, '-m', 'unittest', 'test_execution',
                         'test_tail_strategy', 'test_v8_offline', '-q'],
