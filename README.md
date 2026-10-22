@@ -81,4 +81,4 @@ Copyright (c) 2026 Traveller06。
 - [相应完整源码](https://github.com/Traveller06/AStockQuant/tree/v8.3.6-preview.1)
 - [本次修复与恢复检查点](docs/QFQ_RECOVERY.md)
 
-以 GitHub Actions 验证结果为准，发布前链接可能尚未生效；本次不宣称用户电脑上所有失败股票均已补齐。
+Windows 自动化验证已通过：249项项目测试、71项桌面自检、真实Qt窗口构造、71项独立解压自检；1项私人旧包审计跳过。安装包已发布并下载校验。本次不宣称用户电脑上所有失败股票均已补齐。

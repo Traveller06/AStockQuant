@@ -10,13 +10,26 @@
 
 步骤：
 - [x] 只读核对本地、GitHub main和隔离工作区。
-- [x] 添加合成回归测试（尚未通过）。
+- [x] 添加合成回归测试（17项均通过）。
 - [x] 修复恢复路径并验证旧文件字节保留。
 - [x] 本地249通过、1个可选历史包审计跳过；安装包独立解压71项通过；原策略字节校验通过。
-- [ ] 保存源码到GitHub，Windows CI通过后发布新预览版。
+- [x] 源码已保存到GitHub main，Windows CI成功，v8.3.6-preview.1已发布并下载校验。
 
 当前限制：本环境不能访问用户电脑中的实际旧行情；不能声称164个真实错误全部解决。最终数量需用户重扫验收，网络和数据源缺口仍可能存在。
 
 本地构建为81文件，SHA-256为4a0a7d8be8dee535db7457456206a7c50aa973130272667af08dd08ed4735c9b。Windows构建可能因压缩库差异产生不同ZIP字节，以实际Release校验附件为准。
 
 首次同日期重扫只重试error/stale；已保存的insufficient结果继续保留。历史不足的真实原因仍需独立数据核实，本次不改变此行为。独立快照包含源函数名、日期范围、恢复原因、SHA-256；仅存本机，已被Git忽略且不进安装包。
+
+## 已发布与断点恢复
+
+- main对应发行提交：d02aae59df62b4d90d5ff031583134b10b4b48fe；同名tag v8.3.6-preview.1精确指向此提交。
+- GitHub保存的开发检查点：a5275ba（复现测试），f22c5e1（修复和发行脚本）。本地对应实现提交bdd3809，因GitHub API提交元数据不同，SHA不同但发行文件树一致。
+- Windows验证：https://github.com/Traveller06/AStockQuant/actions/runs/39715074303 ，结果success。250个项目用例中249通过、1个私人旧包审计跳过；桌面71项、解压71项通过；真实Qt窗口构造通过。
+- 安装包：https://github.com/Traveller06/AStockQuant/releases/download/v8.3.6-preview.1/AStockQuant-v8.3.6-preview.1-Windows-Python.zip
+- Windows安装包SHA-256：e6fbbfdc931596bbcb65c020c799545ce97b071ef8f402da60bc021cdf374b40 ，219641字节、81文件。
+- 已下载四个公开附件并核实SHA256SUMS。81个包内文件逐项与对应源码一致，公开下载包独立解压71项测试再次通过。
+- 原75文件中70个字节不变；主入口、两个启动器和版本断言仅改版本号；唯一原行为改动在全市场数据恢复模块。新加快照模块和安装说明。原策略文件字节不变。
+- README、GPL LICENSE保留，未上传用户CSV、行情缓存或账户数据。新快照目录被忽略且不进入白名单安装包。
+
+本轮已完成。下一步是用户在Windows原目录升级并重扫，导出新CSV与原验收统计比较；没有新的用户反馈前不要自动改策略或重复发布。断线恢复先只读检查git status、git log、远端main/tag和本文件，禁止reset/checkout覆盖旧成果。私有运行数据仍只在用户电脑。
