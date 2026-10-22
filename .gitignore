@@ -47,3 +47,6 @@ research_data_checkpoint.json
 *.key
 *.p12
 *.pfx
+
+# Independent market-history recovery snapshots are private runtime data.
+v8_history_snapshots/

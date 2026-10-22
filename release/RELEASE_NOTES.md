@@ -1,21 +1,19 @@
-这是 **Windows Python 双击安装 ZIP 的预发布验证版**，不是独立EXE或经人工实机验收的正式版。
+Windows Python 双击安装 ZIP，预发布验证版。需要Windows 64位和Python（推荐3.11），首次安装依赖需联网；不是独立EXE。
 
-## 下载与安装
+## v8.3.6变化
 
-- 普通用户下载 Assets 中的 `AStockQuant-v8.3.5-preview.1-Windows-Python.zip`，不要误下仅用于源码的 Source code ZIP。
-- Windows 64位，推荐已安装 Python 3.11；首次安装依赖需要联网。
-- 解压后双击 `1_第一次双击_安装并打开.bat`，以后双击 `2_以后双击_启动软件.bat`。
-- 升级保留原有cache、v8_market_updates、v8_runs、tail_strategy_cache、持仓和账户数据。
+- 全市场扫描的旧缓存损坏、复权衔接失败或重叠不足不再阻止请求独立历史。
+- 独立行情通过日期、OHLCV、有限数值、新鲜度检查后，保存至新的v8_history_snapshots目录；原cache和旧增量文件保留。
+- 快照包含SHA-256、日期范围和恢复原因；中断/损坏的快照不作为有效行情使用。
+- 不降低21个完整周要求，不放宽复权衔接阈值；历史不足、数据过期和无效价格继续明确报告。
+- 周线策略、预确认/确认/强确认、规则1/2/3、世坤因子、尾盘策略保持不变。
 
-## 内容与验证
+## 安装与验收
 
-- 复用原v8.3.5全部75个程序文件，保留周线趋势、预确认/确认/强确认、规则1/2/3、世坤因子与尾盘两日策略。
-- 原75个程序文件与上次校验安装包逐项一致；只增加GPL许可证和源码/构建说明。
-- 发布工作流在Windows执行项目测试、71项桌面离线测试、真实Qt窗口构造、独立解压71项自检，全部通过后才发布。
-- 项目测试中，缺失的私人v7.6.3上传包审计明确跳过；该旧包在本次本地恢复后已通过63项审计，不在源码仓库重新分发。
-- 每次实际结果、跳过项、环境版本和对应提交详见本Release的 `VALIDATION.json`；依赖环境见 `requirements-tested.txt`，校验值见 `SHA256SUMS.txt`。
-- 自动化离线检查不代表用户网络下所有股票行情已补齐；没有真实账户下单、实盘收益或Windows人工全市场扫描验收声明。
+下载Assets中的AStockQuant-v8.3.6-preview.1-Windows-Python.zip，解压到原安装目录并双击“1_第一次双击_安装并打开.bat”；以后双击“2_以后双击_启动软件.bat”。保留cache、v8_market_updates、v8_history_snapshots、v8_runs、tail_strategy_cache及所有个人运行数据。
 
-## 相应源码与GPL
+同日期扫描复用已保存成功记录，只重试error/stale；新日期扫描全部股票。实际覆盖率须重新扫描并导出CSV核对。本环境没有用户电脑上的旧缓存，不能宣称164个真实错误全部修复，也不宣称Windows用户网络下已经完成人工验收。
 
-采用GPL-3.0-only。完整对应源码为本Release同名tag `v8.3.5-preview.1` 下的源代码，使用GitHub自动提供的Source code ZIP/tar.gz即可取得。构建步骤见 `BUILDING.md`，程序包内附 `LICENSE`、`SOURCE_INFO.txt` 及第三方许可说明。
+自动化验证通过才发布：完整项目测试、71项桌面测试、真实Qt窗口构造、ZIP解压71项测试。实际结果和源码提交见VALIDATION.json，环境见requirements-tested.txt，校验值见SHA256SUMS.txt。
+
+GPL-3.0-only。完整相应源码见同名tag v8.3.6-preview.1及Source code ZIP；构建说明见BUILDING.md，包内附LICENSE、SOURCE_INFO.txt与第三方许可说明。

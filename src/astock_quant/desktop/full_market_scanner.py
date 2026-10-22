@@ -14,7 +14,8 @@ from uuid import uuid4
 import pandas as pd
 
 from .weekly_trend_scanner import ScreenRow, _closed_week_calendar, _three_tier_row
-from .weekly_trend_updater import merge_history, read_history, REQUIRED
+from .weekly_trend_updater import merge_history, read_history
+from .history_snapshots import HistorySnapshots, validate_history
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -115,27 +116,43 @@ class FullMarketScanner:
     def _history(self, code: str, target: date) -> pd.DataFrame:
         base_path = self.app_dir / 'cache' / f'{code}.csv'
         update_path = self.app_dir / 'v8_market_updates' / f'{code}.csv'
-        base = read_history(base_path) if base_path.exists() else None
-        overlay = read_history(update_path) if update_path.exists() else None
-        if overlay is not None and base is not None:
-            current = merge_history(base, overlay)
+        snapshots = HistorySnapshots(self.app_dir, code)
+        independent = snapshots.load()
+        reason = ''
+        base = current = None
+        if independent is not None:
+            current = independent
         else:
-            current = overlay if overlay is not None else base
+            try:
+                base = validate_history(read_history(base_path)) if base_path.exists() else None
+                overlay = validate_history(read_history(update_path)) if update_path.exists() else None
+                if base is not None and overlay is not None:
+                    current = validate_history(merge_history(base, overlay))
+                else:
+                    current = overlay if overlay is not None else base
+            except (ValueError, TypeError, KeyError, OSError) as exc:
+                reason = str(exc)
         if current is not None and current.index[-1].date() >= target:
             return current
-        fresh = self.history_fetcher(code)
-        if not isinstance(fresh, pd.DataFrame) or fresh.empty:
-            raise ValueError('数据源未返回日线')
-        fresh = fresh.copy().sort_index()
-        fresh.index = pd.to_datetime(fresh.index, errors='raise')
-        if fresh.index.has_duplicates or not REQUIRED <= set(fresh.columns):
-            raise ValueError('行情列缺失或日期重复')
+        fresh = validate_history(self.history_fetcher(code))
         if fresh.index[-1].date() < target:
             raise ValueError(f'数据源最新日期仅到 {fresh.index[-1].date()}')
-        if base is not None:
-            merged = merge_history(base, fresh)
-        else:
-            merged = fresh
+        if independent is not None:
+            # Extend the coherent snapshot only when the strict alignment check succeeds.
+            try:
+                fresh = validate_history(merge_history(independent, fresh))
+                reason = '独立历史快照增量更新，已通过严格复权衔接'
+            except ValueError as exc:
+                reason = str(exc)
+        if not reason:
+            try:
+                merged = validate_history(merge_history(base, fresh)) if base is not None else fresh
+            except ValueError as exc:
+                reason = str(exc)
+        if reason:
+            snapshots.save(fresh, target=target, reason=reason,
+                           source=getattr(self.history_fetcher, '__name__', 'history_fetcher'))
+            return fresh
         update_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = update_path.with_name('.' + uuid4().hex + '.tmp')
         try:

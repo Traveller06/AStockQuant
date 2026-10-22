@@ -30,7 +30,7 @@ def verify_release(archive: Path) -> str:
                         FORBIDDEN.intersection(parts) or name.endswith('/')):
                     raise ValueError(f'压缩包存在不安全路径：{name}')
             source.extractall(root)
-        if 'APP_VERSION = "8.3.5"' not in (root / 'main.py').read_text(encoding='utf8'):
+        if 'APP_VERSION = "8.3.6"' not in (root / 'main.py').read_text(encoding='utf8'):
             raise ValueError('版本标识错误')
         if 'GNU GENERAL PUBLIC LICENSE' not in (root / 'LICENSE').read_text(encoding='utf8'):
             raise ValueError('缺少GPL许可证正文')
