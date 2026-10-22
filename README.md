@@ -72,3 +72,13 @@ Copyright (c) 2026 Traveller06。
 - [相应版本完整源码](https://github.com/Traveller06/AStockQuant/tree/v8.3.5-preview.1)：GitHub Release 同名 tag 也提供 Source code ZIP/tar.gz。
 - [安装、测试与构建说明](BUILDING.md)：含源码启动、ZIP构建、校验及保留个人缓存的升级步骤。
 - [发布进度与恢复记录](docs/PUBLISH_RECOVERY.md)。安装包是预发布验证版；Windows自动化结果见Release的VALIDATION.json，不宣称用户网络下全市场数据已可用。
+
+## v8.3.6 历史行情恢复预览
+
+新增全市场扫描的独立历史恢复：旧缓存损坏、复权冲突或重叠不足时，验证新历史后独立保存，保留原缓存和所有策略。短历史与过期数据仍明确报告。升级保留 `v8_history_snapshots` 及原有运行数据。
+
+- [v8.3.6-preview.1 下载与验证记录](https://github.com/Traveller06/AStockQuant/releases/tag/v8.3.6-preview.1)
+- [相应完整源码](https://github.com/Traveller06/AStockQuant/tree/v8.3.6-preview.1)
+- [本次修复与恢复检查点](docs/QFQ_RECOVERY.md)
+
+以 GitHub Actions 验证结果为准，发布前链接可能尚未生效；本次不宣称用户电脑上所有失败股票均已补齐。

@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: astockquant-v8.3.5-preview.1
+  group: astockquant-v8.3.6-preview.1
   cancel-in-progress: false
 
 jobs:
@@ -25,8 +25,8 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONPATH: src
       QT_QPA_PLATFORM: offscreen
-      RELEASE_TAG: v8.3.5-preview.1
-      RELEASE_ARCHIVE: AStockQuant-v8.3.5-preview.1-Windows-Python.zip
+      RELEASE_TAG: v8.3.6-preview.1
+      RELEASE_ARCHIVE: AStockQuant-v8.3.6-preview.1-Windows-Python.zip
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,7 +49,7 @@ jobs:
           from pathlib import Path
           app = str(Path('windows_app').resolve())
           package = str(Path('src').resolve())
-          code = 'from PySide6.QtWidgets import QApplication; from main import MainWindow; a=QApplication([]); w=MainWindow(); assert "8.3.5" in w.windowTitle(); assert w.weekly_trend.__class__.__name__ == "WeeklyTrendPage"; assert w.menu.count() == 10; assert "强确认" in w.weekly_trend.screen_mode.currentText(); w.close(); print("Qt construction passed")'
+          code = 'from PySide6.QtWidgets import QApplication; from main import MainWindow; a=QApplication([]); w=MainWindow(); assert "8.3.6" in w.windowTitle(); assert w.weekly_trend.__class__.__name__ == "WeeklyTrendPage"; assert w.menu.count() == 10; assert "强确认" in w.weekly_trend.screen_mode.currentText(); w.close(); print("Qt construction passed")'
           # Copy program files so this smoke check creates no runtime state in source.
           import shutil
           with tempfile.TemporaryDirectory() as td:
@@ -67,11 +67,15 @@ jobs:
         run: |
           import hashlib, json, os, platform, subprocess, sys
           import xml.etree.ElementTree as ET
+          from zipfile import ZipFile
           from pathlib import Path
           archive = Path('dist')/os.environ['RELEASE_ARCHIVE']
           suite = ET.parse('project-tests.xml').getroot()
           cases = suite.findall('.//testcase')
           skipped = [c.attrib['name'] for c in cases if c.find('skipped') is not None]
+          original = json.loads(Path('release/v8.3.5-original-payload-sha256.json').read_text(encoding='utf8'))
+          with ZipFile(archive) as z:
+              unchanged = sum(hashlib.sha256(z.read(name)).hexdigest() == digest for name, digest in original.items())
           validation = {
               'tag': os.environ['RELEASE_TAG'], 'source_commit': os.environ['GITHUB_SHA'],
               'workflow_run': 'https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],
@@ -79,7 +83,7 @@ jobs:
               'project_cases': len(cases), 'project_skipped': skipped,
               'project_failures': len(suite.findall('.//failure'))+len(suite.findall('.//error')),
               'desktop_offline_tests': 71, 'extracted_archive_tests': 71,
-              'qt_window_constructed': True, 'original_program_files_unchanged': 75,
+              'qt_window_constructed': True, 'original_program_files_unchanged': unchanged,
               'manual_windows_live_market_tested': False,
               'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
           }
@@ -97,7 +101,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to overwrite published assets.' }
           python scripts/ensure_release_tag.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          gh release create $env:RELEASE_TAG "dist/$env:RELEASE_ARCHIVE" dist/SHA256SUMS.txt dist/VALIDATION.json dist/requirements-tested.txt --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title 'AStockQuant v8.3.5 Windows Python 预发布验证版' --notes-file release/RELEASE_NOTES.md
+          gh release create $env:RELEASE_TAG "dist/$env:RELEASE_ARCHIVE" dist/SHA256SUMS.txt dist/VALIDATION.json dist/requirements-tested.txt --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title 'AStockQuant v8.3.6 Windows Python 预发布验证版' --notes-file release/RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

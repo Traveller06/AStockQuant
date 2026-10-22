@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title AStockQuant v8.3.5 安装并启动
+title AStockQuant v8.3.6 安装并启动
 cd /d "%~dp0"
 
 echo ========================================
-echo   AStockQuant v8.3.5 正在自动安装
+echo   AStockQuant v8.3.6 正在自动安装
 echo   请不要关闭这个窗口
 echo ========================================
 echo.
@@ -34,7 +34,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/3] 正在打开 AStockQuant v8.3.5...
+echo [3/3] 正在打开 AStockQuant v8.3.6...
 start "" ".venv\Scripts\pythonw.exe" main.py
 if errorlevel 1 (
   echo 启动失败，正在显示错误信息...

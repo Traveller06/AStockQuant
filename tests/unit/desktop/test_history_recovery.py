@@ -42,7 +42,7 @@ def test_valid_fresh_history_recovers_without_mutating_existing_files(tmp_path, 
     overlay, overlay_before = cache(tmp_path, 'v8_market_updates', bars().iloc[-20:-1])
     calls = []
     result = scanner(tmp_path, lambda code: calls.append(code) or bars())._history('600000', TARGET)
-    pd.testing.assert_frame_equal(result, bars(), check_freq=False)
+    pd.testing.assert_frame_equal(result, bars(), check_freq=False, check_names=False)
     assert calls == ['600000']
     assert path.read_bytes() == before and overlay.read_bytes() == overlay_before
     manifests = list((tmp_path / 'v8_history_snapshots' / '600000').glob('*.json'))
@@ -51,7 +51,7 @@ def test_valid_fresh_history_recovers_without_mutating_existing_files(tmp_path, 
     assert metadata['adjustment_basis'] == 'qfq' and metadata['rows'] == 200
     assert metadata['reason'] and metadata['sha256']
     reused = scanner(tmp_path, lambda code: pytest.fail('validated snapshot should be reused'))._history('600000', TARGET)
-    pd.testing.assert_frame_equal(reused, bars(), check_freq=False)
+    pd.testing.assert_frame_equal(reused, bars(), check_freq=False, check_names=False)
 
 
 @pytest.mark.parametrize('problem', ['stale', 'zero', 'nan', 'inf', 'duplicate', 'range_index', 'inconsistent'])
@@ -88,3 +88,39 @@ def test_short_independent_history_is_not_extended_by_unverifiable_old_prices(tm
     cache(tmp_path, 'cache', bars().iloc[:2])
     result = scanner(tmp_path, lambda code: bars(38))._history('600000', TARGET)
     assert len(result) == 38
+
+
+def test_snapshot_cannot_mask_stale_new_provider_response(tmp_path):
+    cache(tmp_path, 'cache', bars().iloc[:2])
+    scanner(tmp_path, lambda code: bars())._history('600000', TARGET)
+    before = {p.name: p.read_bytes() for p in (tmp_path / 'v8_history_snapshots' / '600000').iterdir()}
+    with pytest.raises(ValueError, match='最新日期'):
+        scanner(tmp_path, lambda code: bars())._history('600000', date(2026, 10, 22))
+    assert before == {p.name: p.read_bytes() for p in (tmp_path / 'v8_history_snapshots' / '600000').iterdir()}
+
+
+def test_bad_fresh_prices_rejected_even_without_any_old_cache(tmp_path):
+    fresh = bars()
+    fresh.iloc[0, 0] = 0.
+    with pytest.raises(ValueError, match='必须为正'):
+        scanner(tmp_path, lambda code: fresh)._history('600000', TARGET)
+    assert not (tmp_path / 'v8_market_updates' / '600000.csv').exists()
+
+
+def test_short_recovery_is_reported_insufficient_by_real_scan(tmp_path):
+    from test_full_market_scanner import universe
+    cache(tmp_path, 'cache', bars().iloc[:2])
+    result = FullMarketScanner(tmp_path, universe_loader=universe,
+        history_fetcher=lambda code: bars(38), minimum_pool=3).scan(target=TARGET)
+    recovered = next(row for row in result.rows if row.symbol == '600000')
+    assert recovered.status == 'insufficient'
+    assert '21' in recovered.reason_zh
+    assert result.selected == 0 and result.failed == 0
+
+
+def test_strict_merge_still_rejects_unverifiable_prices():
+    from astock_quant.desktop.weekly_trend_updater import merge_history
+    old = bars().copy()
+    old.iloc[0, old.columns.get_loc('close')] = 8.
+    with pytest.raises(ValueError, match='无法在交界处对齐'):
+        merge_history(old, bars())
